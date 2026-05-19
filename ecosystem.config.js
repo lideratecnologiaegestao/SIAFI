@@ -1,0 +1,41 @@
+module.exports = {
+  apps: [
+    {
+      name: 'siafi-api',
+      script: 'dist/src/main.js',
+      cwd: 'D:/LIDERA/SIAFI/backend',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      env_production: {
+        NODE_ENV: 'production',
+        PORT: 4010,
+      },
+      error_file: 'D:/LIDERA/SIAFI/logs/api-error.log',
+      out_file:   'D:/LIDERA/SIAFI/logs/api-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+    {
+      name: 'siafi-web',
+      script: 'node_modules/next/dist/bin/next',
+      args: 'start --port 4011',
+      interpreter: 'node',
+      cwd: 'D:/LIDERA/SIAFI/frontend',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      env_production: {
+        NODE_ENV: 'production',
+        PORT: 4011,
+        NEXT_PUBLIC_API_URL: 'https://financeiro.lidera.app.br/api',
+      },
+      error_file: 'D:/LIDERA/SIAFI/logs/web-error.log',
+      out_file:   'D:/LIDERA/SIAFI/logs/web-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+  ],
+}

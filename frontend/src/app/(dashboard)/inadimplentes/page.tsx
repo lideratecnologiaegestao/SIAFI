@@ -1,0 +1,115 @@
+'use client'
+
+import { useQuery } from '@tanstack/react-query'
+import Link from 'next/link'
+import { AlertCircle, RefreshCw } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { formatCurrency, formatDate, formatCPF, formatPhone } from '@/lib/utils'
+import api from '@/lib/api'
+
+interface Loan {
+  id: number; valor: number; numeroParcelas: number; dataInicio: string; status: string
+  client: { id: number; nome: string; cpf: string; whatsapp: string }
+  installments: Array<{ id: number; valor: number; totalPago: number; dataVencimento: string; status: string }>
+}
+
+export default function InadimplentesPage() {
+  const { data: loans, isLoading, isError, refetch } = useQuery({
+    queryKey: ['loans', { status: 'inadimplente' }],
+    queryFn: () => api.get<any>('/loans', { params: { status: 'inadimplente', limit: 200 } }).then((r) => r.data.data ?? r.data),
+  })
+
+  const calcSaldoDevedor = (installments: Loan['installments']) =>
+    installments.reduce((s, i) => s + (Number(i.valor) - Number(i.totalPago)), 0)
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <AlertCircle className="size-6 text-destructive" />Inadimplentes
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">Clientes com parcelas em atraso</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" />Atualizar</Button>
+      </div>
+
+      {isLoading ? (
+        <Card><CardContent className="p-6 space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</CardContent></Card>
+      ) : isError ? (
+        <Card><CardContent className="p-8 text-center text-muted-foreground"><Button variant="outline" size="sm" onClick={() => refetch()}>Tentar novamente</Button></CardContent></Card>
+      ) : !loans?.length ? (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="size-8 text-green-600" />
+            </div>
+            <h3 className="font-semibold text-green-700">Nenhum inadimplente!</h3>
+            <p className="text-muted-foreground text-sm mt-1">Todos os empréstimos estão em dia.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card className="bg-red-50 dark:bg-red-950/20 border-red-200">
+              <CardContent className="pt-4"><p className="text-xs text-muted-foreground">Contratos Inadimplentes</p><p className="text-2xl font-bold text-red-700">{loans.length}</p></CardContent>
+            </Card>
+            <Card className="bg-red-50 dark:bg-red-950/20 border-red-200">
+              <CardContent className="pt-4"><p className="text-xs text-muted-foreground">Total em Atraso</p><p className="text-2xl font-bold text-red-700">{formatCurrency(loans.reduce((s: number, l: Loan) => s + calcSaldoDevedor(l.installments ?? []), 0))}</p></CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4"><p className="text-xs text-muted-foreground">Clientes Únicos</p><p className="text-2xl font-bold">{new Set(loans.map((l: Loan) => l.client?.id)).size}</p></CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Cliente</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">CPF</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">WhatsApp</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Saldo Devedor</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loans.map((loan: Loan) => {
+                      const saldo = calcSaldoDevedor(loan.installments ?? [])
+                      return (
+                        <tr key={loan.id} className="border-b border-border hover:bg-muted/20">
+                          <td className="px-4 py-3">
+                            <Link href={`/clientes/${loan.client?.id}`} className="font-medium hover:underline">{loan.client?.nome}</Link>
+                            <p className="text-xs text-muted-foreground">Emp. #{loan.id}</p>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{loan.client?.cpf ? formatCPF(loan.client.cpf) : '—'}</td>
+                          <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{loan.client?.whatsapp ? formatPhone(loan.client.whatsapp) : '—'}</td>
+                          <td className="px-4 py-3 text-right font-bold text-destructive">{formatCurrency(saldo)}</td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex justify-end gap-1">
+                              <Link href={`/emprestimos/${loan.id}`}>
+                                <Button size="sm" variant="outline" className="h-7 text-xs">Ver</Button>
+                              </Link>
+                              <Link href={`/renegociacoes/nova?loanId=${loan.id}`}>
+                                <Button size="sm" variant="outline" className="h-7 text-xs">Renegociar</Button>
+                              </Link>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
