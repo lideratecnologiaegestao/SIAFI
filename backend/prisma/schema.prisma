@@ -113,6 +113,7 @@ model User {
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
   transactions  Transaction[]
+  client        Client?
 
   @@map("users")
 }
@@ -158,6 +159,8 @@ model Client {
   fotoPath          String?         @map("foto_path")
   rgPath            String?         @map("rg_path")
   comprovantePath   String?         @map("comprovante_path")
+  // Vínculo com conta de acesso ao portal do cliente
+  userId            Int?            @unique           @map("user_id")
   active            Boolean         @default(true)
   notificacoesEmail Boolean         @default(true)   @map("notificacoes_email")
   observacoes       String?         @db.Text
@@ -170,6 +173,7 @@ model Client {
   createdAt         DateTime        @default(now())  @map("created_at")
   updatedAt         DateTime        @updatedAt       @map("updated_at")
 
+  user                 User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
   loans                Loan[]
   pixPayments          PixPayment[]
   notifications        Notification[]
@@ -354,24 +358,30 @@ model Transaction {
 // ─── PixPayment ───────────────────────────────────────────────────────────────
 
 model PixPayment {
-  id            Int       @id @default(autoincrement())
-  installmentId Int       @map("installment_id")
-  clientId      Int       @map("client_id")
-  paymentId     String?   @map("payment_id")
-  qrCode        String?   @map("qr_code") @db.Text
-  qrImage       String?   @map("qr_image") @db.Text
-  amount        Decimal   @db.Decimal(15, 2)
-  status        String    @default("pendente")
-  sentWhatsapp  Boolean   @default(false) @map("sent_whatsapp")
-  sentAt        DateTime? @map("sent_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id             Int       @id @default(autoincrement())
+  installmentId  Int       @map("installment_id")
+  clientId       Int       @map("client_id")
+  paymentId      String?   @map("payment_id")
+  tipo           String    @default("pix")              // "pix" | "boleto"
+  qrCode         String?   @map("qr_code") @db.Text
+  qrImage        String?   @map("qr_image") @db.Text
+  barcodeContent String?   @map("barcode_content") @db.Text
+  boletoUrl      String?   @map("boleto_url") @db.VarChar(500)
+  amount         Decimal   @db.Decimal(15, 2)           // saldo da parcela
+  valorEncargos  Decimal?  @map("valor_encargos") @db.Decimal(15, 2) // mora + multa (reemissões)
+  status         String    @default("pendente")         // pendente | pago | expirado | cancelado
+  expiresAt      DateTime? @map("expires_at")
+  sentWhatsapp   Boolean   @default(false) @map("sent_whatsapp")
+  sentAt         DateTime? @map("sent_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   installment Installment @relation(fields: [installmentId], references: [id])
   client      Client      @relation(fields: [clientId], references: [id])
 
   @@index([installmentId])
   @@index([paymentId])
+  @@index([tipo])
   @@map("pix_payments")
 }
 

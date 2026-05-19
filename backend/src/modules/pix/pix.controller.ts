@@ -24,6 +24,12 @@ export class PixController {
     return this.pixService.generate(dto);
   }
 
+  @Post(':id/reissue')
+  @Roles('admin', 'financeiro')
+  reissue(@Param('id', ParseIntPipe) id: number) {
+    return this.pixService.reissue(id);
+  }
+
   @Get('installment/:installmentId')
   @Roles('admin', 'financeiro', 'caixa')
   findByInstallment(

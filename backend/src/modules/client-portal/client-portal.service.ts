@@ -9,9 +9,26 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class ClientPortalService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getMyInfo(userId: number): Promise<unknown> {
+  // Busca o Client vinculado ao User autenticado.
+  // Lança ForbiddenException se o User não estiver associado a nenhum Client —
+  // impede que qualquer usuário sem vínculo acesse dados alheios.
+  private async resolveClient(userId: number) {
     const client = await this.prisma.client.findUnique({
-      where: { id: userId },
+      where: { userId },
+    });
+    if (!client) {
+      throw new ForbiddenException(
+        'Conta de usuário não está vinculada a um registro de cliente',
+      );
+    }
+    return client;
+  }
+
+  async getMyInfo(userId: number): Promise<unknown> {
+    const client = await this.resolveClient(userId);
+
+    const data = await this.prisma.client.findUnique({
+      where: { id: client.id },
       select: {
         id: true,
         nome: true,
@@ -24,15 +41,12 @@ export class ClientPortalService {
         estado: true,
       },
     });
-    if (!client) throw new NotFoundException('Dados do cliente não encontrados');
-    return client;
+    if (!data) throw new NotFoundException('Dados do cliente não encontrados');
+    return data;
   }
 
   async getMyLoans(userId: number): Promise<unknown> {
-    const client = await this.prisma.client.findUnique({
-      where: { id: userId },
-    });
-    if (!client) throw new NotFoundException('Cliente não encontrado');
+    const client = await this.resolveClient(userId);
 
     return this.prisma.loan.findMany({
       where: { clientId: client.id },
@@ -47,10 +61,7 @@ export class ClientPortalService {
   }
 
   async getMyInstallments(userId: number): Promise<unknown> {
-    const client = await this.prisma.client.findUnique({
-      where: { id: userId },
-    });
-    if (!client) throw new ForbiddenException();
+    const client = await this.resolveClient(userId);
 
     return this.prisma.installment.findMany({
       where: {
@@ -66,10 +77,7 @@ export class ClientPortalService {
   }
 
   async getMyTickets(userId: number): Promise<unknown> {
-    const client = await this.prisma.client.findUnique({
-      where: { id: userId },
-    });
-    if (!client) throw new ForbiddenException();
+    const client = await this.resolveClient(userId);
 
     return this.prisma.supportTicket.findMany({
       where: { clientId: client.id },
@@ -82,10 +90,7 @@ export class ClientPortalService {
     assunto: string,
     mensagem: string,
   ): Promise<unknown> {
-    const client = await this.prisma.client.findUnique({
-      where: { id: userId },
-    });
-    if (!client) throw new ForbiddenException();
+    const client = await this.resolveClient(userId);
 
     return this.prisma.supportTicket.create({
       data: { clientId: client.id, assunto, mensagem },

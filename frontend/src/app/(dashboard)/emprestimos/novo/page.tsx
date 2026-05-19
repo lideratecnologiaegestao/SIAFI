@@ -37,7 +37,7 @@ export default function NovoEmprestimoPage() {
 
   const { data: clients } = useQuery({
     queryKey: ['clients-list'],
-    queryFn: () => api.get<any>('/clients', { params: { limit: 200 } }).then((r) => r.data.data ?? r.data),
+    queryFn: () => api.get<any>('/clients', { params: { limit: 500, status: 'active' } }).then((r) => r.data.data ?? r.data),
   })
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({

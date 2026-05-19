@@ -1,12 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
-import { QrCode, RefreshCw, Copy, Check } from 'lucide-react'
+import {
+  QrCode, RefreshCw, Copy, Check, ExternalLink, Send,
+  AlertTriangle, Clock, CircleCheck, XCircle, ChevronDown,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,23 +23,78 @@ import api from '@/lib/api'
 const schema = z.object({ installmentId: z.coerce.number().min(1) })
 type FormData = z.infer<typeof schema>
 
-interface PixPayment {
-  id: number; qrCode: string; qrImage: string; amount: number; status: string
-  sentAt: string; createdAt: string
-  installment: { id: number; numero: number; loan: { id: number; client: { nome: string } } }
+interface Charge {
+  id: number
+  tipo: string
+  qrCode: string | null
+  qrImage: string | null
+  barcodeContent: string | null
+  boletoUrl: string | null
+  amount: number
+  valorEncargos: number | null
+  status: string
+  expiresAt: string | null
+  createdAt: string
+}
+
+function ChargeStatusBadge({ status, expiresAt }: { status: string; expiresAt: string | null }) {
+  const expired = expiresAt && new Date(expiresAt) < new Date() && status === 'pendente'
+
+  if (status === 'pago') return <Badge className="bg-green-100 text-green-700 border-green-200"><CircleCheck className="size-3 mr-1" />Pago</Badge>
+  if (status === 'cancelado') return <Badge variant="destructive"><XCircle className="size-3 mr-1" />Cancelado</Badge>
+  if (status === 'expirado' || expired) return <Badge className="bg-orange-100 text-orange-700 border-orange-200"><AlertTriangle className="size-3 mr-1" />Expirado</Badge>
+  return <Badge className="bg-blue-100 text-blue-700 border-blue-200"><Clock className="size-3 mr-1" />Aguardando</Badge>
+}
+
+function ExpiresIn({ expiresAt }: { expiresAt: string | null }) {
+  if (!expiresAt) return null
+  const exp = new Date(expiresAt)
+  const now = new Date()
+  if (exp < now) return <p className="text-xs text-orange-600">Expirou em {formatDateTime(expiresAt)}</p>
+  const diffMs = exp.getTime() - now.getTime()
+  const diffH = Math.floor(diffMs / 3_600_000)
+  const diffM = Math.floor((diffMs % 3_600_000) / 60_000)
+  return (
+    <p className="text-xs text-muted-foreground">
+      Válido até {formatDateTime(expiresAt)}
+      {diffH < 24 && <span className="text-amber-600 font-medium"> ({diffH}h{diffM}m restantes)</span>}
+    </p>
+  )
 }
 
 export default function PixPage() {
   const qc = useQueryClient()
   const searchParams = useSearchParams()
   const preParcelaId = searchParams.get('parcelaId')
-  const [copied, setCopied] = useState(false)
+
+  const [copiedId, setCopiedId] = useState<number | null>(null)
   const [clienteId, setClienteId] = useState('')
   const [loanId, setLoanId] = useState('')
+  const [tipoGerar, setTipoGerar] = useState<'pix' | 'boleto'>('pix')
+  const [expHours, setExpHours] = useState(24)
+  const [expDays, setExpDays] = useState(3)
+  const [showHistory, setShowHistory] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const { data: clients } = useQuery({ queryKey: ['clients-list'], queryFn: () => api.get<any>('/clients', { params: { limit: 200 } }).then(r => r.data.data ?? r.data) })
-  const { data: loans } = useQuery({ queryKey: ['loans-by-client-pix', clienteId], queryFn: () => api.get<any>('/loans', { params: { clientId: clienteId, status: 'ativo', limit: 50 } }).then(r => r.data.data ?? r.data), enabled: !!clienteId })
-  const { data: installments } = useQuery({ queryKey: ['installments-by-loan-pix', loanId], queryFn: () => api.get<any>(`/loans/${loanId}`).then(r => r.data.installments?.filter((i: any) => i.status !== 'pago' && i.status !== 'cancelado') ?? []), enabled: !!loanId })
+  const { data: clients } = useQuery({
+    queryKey: ['clients-list'],
+    queryFn: () => api.get<any>('/clients', { params: { limit: 500, status: 'active' } }).then(r => r.data.data ?? r.data),
+  })
+
+  const { data: loans } = useQuery({
+    queryKey: ['loans-by-client-pix', clienteId],
+    queryFn: () => api.get<any>('/loans', { params: { clientId: clienteId, status: 'ativo', limit: 50 } }).then(r => r.data.data ?? r.data),
+    enabled: !!clienteId,
+  })
+
+  const { data: installments } = useQuery({
+    queryKey: ['installments-by-loan-pix', loanId],
+    queryFn: () =>
+      api.get<any>(`/loans/${loanId}`).then(r =>
+        (r.data.installments ?? []).filter((i: any) => i.status !== 'pago' && i.status !== 'cancelado')
+      ),
+    enabled: !!loanId,
+  })
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
@@ -44,33 +102,85 @@ export default function PixPage() {
   })
 
   const installmentId = watch('installmentId')
-  const { data: pixData, isLoading: loadingPix } = useQuery({
-    queryKey: ['pix', installmentId],
-    queryFn: () => api.get<PixPayment[]>(`/pix/${installmentId}`).then(r => r.data),
+
+  const { data: charges, isLoading: loadingCharges, refetch: refetchCharges } = useQuery({
+    queryKey: ['pix-charges', installmentId],
+    queryFn: () => api.get<Charge[]>(`/pix/installment/${installmentId}`).then(r => r.data),
     enabled: !!installmentId && installmentId > 0,
   })
 
+  const latestActive = charges?.find(c => c.status === 'pendente' && (!c.expiresAt || new Date(c.expiresAt) > new Date()))
+  const latestCharge = charges?.[0]
+
+  // Poll MP status every 5s while there's an active pending PIX
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (latestActive?.tipo === 'pix' && latestActive.status === 'pendente') {
+      pollRef.current = setInterval(async () => {
+        try {
+          const { data } = await api.get(`/pix/${latestActive.id}/status`)
+          if (data.status === 'pago' || data.mpStatus === 'approved') {
+            refetchCharges()
+            if (pollRef.current) clearInterval(pollRef.current)
+          }
+        } catch { /* ignore */ }
+      }, 6_000)
+    }
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [latestActive?.id, latestActive?.status])
+
   const generateMut = useMutation({
-    mutationFn: (data: FormData) => api.post('/pix/generate', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pix', installmentId] }),
+    mutationFn: (data: FormData) =>
+      api.post('/pix/generate', {
+        installmentId: data.installmentId,
+        tipo: tipoGerar,
+        expirationHours: tipoGerar === 'pix' ? expHours : undefined,
+        expirationDays: tipoGerar === 'boleto' ? expDays : undefined,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pix-charges', installmentId] }),
   })
 
-  function copyQR(text: string) {
+  const reissueMut = useMutation({
+    mutationFn: (chargeId: number) => api.post(`/pix/${chargeId}/reissue`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pix-charges', installmentId] }),
+  })
+
+  function copyText(text: string, id: number) {
     navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2500)
   }
 
-  const latestPix = pixData?.[0]
+  function sendWhatsApp(charge: Charge, clienteNome: string, whatsapp: string | undefined) {
+    const phone = whatsapp?.replace(/\D/g, '')
+    if (!phone) return
+    const valor = formatCurrency(Number(charge.amount) + Number(charge.valorEncargos ?? 0))
+    let msg = ''
+    if (charge.tipo === 'pix' && charge.qrCode) {
+      msg = `Olá ${clienteNome}! Segue o PIX Copia e Cola para pagamento de ${valor}:\n\n${charge.qrCode}\n\nVálido até ${charge.expiresAt ? formatDateTime(charge.expiresAt) : 'breve'}.`
+    } else if (charge.tipo === 'boleto' && charge.barcodeContent) {
+      msg = `Olá ${clienteNome}! Segue o código de barras do boleto para pagamento de ${valor}:\n\n${charge.barcodeContent}\n\nVencimento: ${charge.expiresAt ? formatDate(charge.expiresAt) : ''}.`
+    }
+    window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+  }
+
   const selectedInst = (installments as any[])?.find((i: any) => i.id === Number(installmentId))
+  const selectedClient = (clients as any[])?.find((c: any) => c.id === Number(clienteId))
+  const selectedLoan = (loans as any[])?.find((l: any) => l.id === Number(loanId))
+  const isOverdue = selectedInst && new Date(selectedInst.dataVencimento) < new Date()
 
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><QrCode className="size-6" />PIX</h1>
-        <p className="text-muted-foreground text-sm mt-1">Gerar QR Code PIX para pagamento de parcela</p>
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <QrCode className="size-6" />Cobranças PIX / Boleto
+        </h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Gere QR Code PIX, Copia e Cola ou boleto por parcela. Reemita com encargos após vencimento.
+        </p>
       </div>
 
+      {/* Seleção */}
       <Card>
         <CardHeader><CardTitle className="text-base">Selecionar Parcela</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -78,77 +188,307 @@ export default function PixPage() {
             <>
               <div className="space-y-1.5">
                 <Label>Cliente</Label>
-                <Select value={clienteId} onChange={(e) => { setClienteId(e.target.value); setLoanId('') }}>
-                  <option value="">Selecione...</option>
-                  {(clients ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                <Select value={clienteId} onChange={e => { setClienteId(e.target.value); setLoanId(''); setValue('installmentId', 0) }}>
+                  <option value="">Selecione o cliente...</option>
+                  {(clients ?? []).map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.nome}</option>
+                  ))}
                 </Select>
               </div>
+
               {clienteId && (
                 <div className="space-y-1.5">
-                  <Label>Empréstimo</Label>
-                  <Select value={loanId} onChange={(e) => setLoanId(e.target.value)}>
-                    <option value="">Selecione...</option>
-                    {((loans ?? []) as any[]).map((l: any) => <option key={l.id} value={l.id}>#{l.id} — {formatCurrency(l.valor)}</option>)}
+                  <Label>Empréstimo ativo</Label>
+                  <Select value={loanId} onChange={e => { setLoanId(e.target.value); setValue('installmentId', 0) }}>
+                    <option value="">Selecione o empréstimo...</option>
+                    {((loans ?? []) as any[]).map((l: any) => (
+                      <option key={l.id} value={l.id}>#{l.id} — {formatCurrency(l.valor)} — {l.numeroParcelas}x</option>
+                    ))}
                   </Select>
                 </div>
               )}
+
               {loanId && (
                 <div className="space-y-1.5">
                   <Label>Parcela</Label>
                   <Select {...register('installmentId', { valueAsNumber: true })}>
-                    <option value="">Selecione...</option>
-                    {((installments ?? []) as any[]).map((i: any) => (
-                      <option key={i.id} value={i.id}>P{i.numero} — Venc. {formatDate(i.dataVencimento)} — {formatCurrency(Number(i.valor) - Number(i.totalPago))}</option>
-                    ))}
+                    <option value="">Selecione a parcela...</option>
+                    {((installments ?? []) as any[]).map((i: any) => {
+                      const saldo = Number(i.valor) - Number(i.totalPago)
+                      const atrasada = new Date(i.dataVencimento) < new Date()
+                      return (
+                        <option key={i.id} value={i.id}>
+                          {atrasada ? '⚠️ ' : ''}P{i.numero} — Venc. {formatDate(i.dataVencimento)} — {formatCurrency(saldo)}{atrasada ? ' (atrasada)' : ''}
+                        </option>
+                      )
+                    })}
                   </Select>
+                  {errors.installmentId && <p className="text-xs text-destructive">{errors.installmentId.message}</p>}
                 </div>
               )}
             </>
           )}
 
           {installmentId > 0 && selectedInst && (
-            <div className="rounded-lg bg-muted/50 px-4 py-3 text-sm">
-              <p className="font-medium">Parcela #{selectedInst.numero}</p>
-              <p className="text-muted-foreground">Saldo: {formatCurrency(Number(selectedInst.valor) - Number(selectedInst.totalPago))}</p>
+            <div className={`rounded-lg px-4 py-3 text-sm ${isOverdue ? 'bg-orange-50 border border-orange-200' : 'bg-muted/50'}`}>
+              <p className="font-medium">
+                {isOverdue && <AlertTriangle className="size-4 inline mr-1 text-orange-600" />}
+                Parcela #{selectedInst.numero} — {formatCurrency(Number(selectedInst.valor) - Number(selectedInst.totalPago))}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                Vencimento: {formatDate(selectedInst.dataVencimento)}
+                {isOverdue && ` • ${Math.floor((Date.now() - new Date(selectedInst.dataVencimento).getTime()) / 86_400_000)} dias em atraso`}
+              </p>
             </div>
-          )}
-
-          {installmentId > 0 && (
-            <Button onClick={handleSubmit((d) => generateMut.mutate(d))} disabled={generateMut.isPending} className="gap-2 w-full">
-              <QrCode className="size-4" />{generateMut.isPending ? 'Gerando QR Code...' : 'Gerar QR Code PIX'}
-            </Button>
           )}
         </CardContent>
       </Card>
 
-      {loadingPix ? (
-        <Skeleton className="h-64 w-full" />
-      ) : latestPix ? (
+      {/* Gerar cobrança */}
+      {installmentId > 0 && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">QR Code PIX</CardTitle>
-            <Badge variant={latestPix.status === 'pago' ? 'success' : 'warning'}>
-              {latestPix.status === 'pago' ? 'Pago' : 'Aguardando'}
-            </Badge>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            {latestPix.qrImage && (
-              <img src={`data:image/png;base64,${latestPix.qrImage}`} alt="QR Code PIX" className="mx-auto max-w-[200px] rounded-lg" />
-            )}
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-muted-foreground">Copia e Cola</p>
-              <div className="flex gap-2">
-                <Input readOnly value={latestPix.qrCode} className="text-xs font-mono" />
-                <Button variant="outline" size="sm" onClick={() => copyQR(latestPix.qrCode)} className="shrink-0">
-                  {copied ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
-                </Button>
-              </div>
+          <CardHeader><CardTitle className="text-base">Gerar Cobrança</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-2">
+              <Button
+                variant={tipoGerar === 'pix' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTipoGerar('pix')}
+                className={tipoGerar === 'pix' ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}
+              >
+                <QrCode className="size-4 mr-2" />PIX
+              </Button>
+              <Button
+                variant={tipoGerar === 'boleto' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTipoGerar('boleto')}
+                className={tipoGerar === 'boleto' ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}
+              >
+                Boleto Bancário
+              </Button>
             </div>
-            <p className="text-sm text-muted-foreground">Valor: <span className="font-bold text-foreground">{formatCurrency(latestPix.amount)}</span></p>
-            <p className="text-xs text-muted-foreground">Gerado em {formatDateTime(latestPix.createdAt)}</p>
+
+            {tipoGerar === 'pix' && (
+              <div className="flex items-center gap-3">
+                <Label className="whitespace-nowrap text-sm">Validade</Label>
+                <Select value={String(expHours)} onChange={e => setExpHours(Number(e.target.value))} className="w-40">
+                  <option value="1">1 hora</option>
+                  <option value="6">6 horas</option>
+                  <option value="12">12 horas</option>
+                  <option value="24">24 horas</option>
+                  <option value="48">48 horas</option>
+                  <option value="72">72 horas</option>
+                </Select>
+              </div>
+            )}
+
+            {tipoGerar === 'boleto' && (
+              <div className="flex items-center gap-3">
+                <Label className="whitespace-nowrap text-sm">Prazo de pagamento</Label>
+                <Select value={String(expDays)} onChange={e => setExpDays(Number(e.target.value))} className="w-40">
+                  <option value="3">3 dias</option>
+                  <option value="5">5 dias</option>
+                  <option value="7">7 dias</option>
+                  <option value="10">10 dias</option>
+                  <option value="15">15 dias</option>
+                  <option value="30">30 dias</option>
+                </Select>
+              </div>
+            )}
+
+            {generateMut.isError && (
+              <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {(generateMut.error as any)?.response?.data?.message ?? 'Erro ao gerar cobrança'}
+              </div>
+            )}
+
+            <Button
+              onClick={handleSubmit(d => generateMut.mutate(d))}
+              disabled={generateMut.isPending}
+              className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <QrCode className="size-4" />
+              {generateMut.isPending ? 'Gerando...' : `Gerar ${tipoGerar === 'pix' ? 'QR Code PIX' : 'Boleto'}`}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Cobrança ativa */}
+      {loadingCharges ? (
+        <Skeleton className="h-64 w-full rounded-xl" />
+      ) : latestCharge ? (
+        <Card className={latestActive ? 'border-blue-200' : ''}>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base">
+                {latestCharge.tipo === 'pix' ? 'PIX' : 'Boleto'} #{latestCharge.id}
+              </CardTitle>
+              <ChargeStatusBadge status={latestCharge.status} expiresAt={latestCharge.expiresAt} />
+            </div>
+            <div className="flex gap-2">
+              {/* Reissue when expired or overdue */}
+              {(latestCharge.status === 'expirado' ||
+                latestCharge.status === 'cancelado' ||
+                (latestCharge.status === 'pendente' && latestCharge.expiresAt && new Date(latestCharge.expiresAt) < new Date())
+              ) && isOverdue !== undefined && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-orange-300 text-orange-700 hover:bg-orange-50 gap-1 text-xs"
+                  disabled={reissueMut.isPending}
+                  onClick={() => {
+                    if (confirm(`Reemitir com encargos de mora e multa calculados automaticamente?`))
+                      reissueMut.mutate(latestCharge.id)
+                  }}
+                >
+                  <RefreshCw className="size-3" />
+                  Reemitir{isOverdue ? ' com Encargos' : ''}
+                </Button>
+              )}
+              {/* Check status */}
+              {latestCharge.status === 'pendente' && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => api.get(`/pix/${latestCharge.id}/status`).then(() => refetchCharges())}
+                >
+                  <RefreshCw className="size-3" />
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Valor principal</span>
+              <span className="font-semibold">{formatCurrency(Number(latestCharge.amount))}</span>
+            </div>
+            {latestCharge.valorEncargos && Number(latestCharge.valorEncargos) > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-orange-600">Encargos (mora + multa)</span>
+                <span className="font-semibold text-orange-600">+ {formatCurrency(Number(latestCharge.valorEncargos))}</span>
+              </div>
+            )}
+            {latestCharge.valorEncargos && Number(latestCharge.valorEncargos) > 0 && (
+              <div className="flex justify-between text-sm border-t pt-2">
+                <span className="font-medium">Total</span>
+                <span className="font-bold">{formatCurrency(Number(latestCharge.amount) + Number(latestCharge.valorEncargos))}</span>
+              </div>
+            )}
+
+            <ExpiresIn expiresAt={latestCharge.expiresAt} />
+
+            {/* PIX QR Code */}
+            {latestCharge.tipo === 'pix' && latestCharge.qrImage && (
+              <div className="flex flex-col items-center gap-3 pt-2">
+                <img
+                  src={`data:image/png;base64,${latestCharge.qrImage}`}
+                  alt="QR Code PIX"
+                  className="w-48 h-48 rounded-lg border"
+                />
+              </div>
+            )}
+
+            {/* PIX Copia e Cola */}
+            {latestCharge.tipo === 'pix' && latestCharge.qrCode && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Copia e Cola</Label>
+                <div className="flex gap-2">
+                  <Input readOnly value={latestCharge.qrCode} className="text-xs font-mono" />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => copyText(latestCharge.qrCode!, latestCharge.id)}
+                  >
+                    {copiedId === latestCharge.id ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Boleto */}
+            {latestCharge.tipo === 'boleto' && latestCharge.barcodeContent && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Linha Digitável</Label>
+                <div className="flex gap-2">
+                  <Input readOnly value={latestCharge.barcodeContent} className="text-xs font-mono" />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => copyText(latestCharge.barcodeContent!, latestCharge.id)}
+                  >
+                    {copiedId === latestCharge.id ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {latestCharge.tipo === 'boleto' && latestCharge.boletoUrl && (
+              <a
+                href={latestCharge.boletoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+              >
+                <ExternalLink className="size-4" />Abrir PDF do Boleto
+              </a>
+            )}
+
+            {/* Enviar WhatsApp */}
+            {latestActive && selectedClient?.whatsapp && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2 border-green-300 text-green-700 hover:bg-green-50"
+                onClick={() => sendWhatsApp(latestCharge, selectedClient.nome, selectedClient.whatsapp)}
+              >
+                <Send className="size-4" />Enviar por WhatsApp para {selectedClient.nome}
+              </Button>
+            )}
+
+            <p className="text-xs text-muted-foreground text-center">Gerado em {formatDateTime(latestCharge.createdAt)}</p>
+          </CardContent>
+        </Card>
+      ) : installmentId > 0 && !loadingCharges ? (
+        <Card className="border-dashed">
+          <CardContent className="py-8 text-center text-muted-foreground text-sm">
+            Nenhuma cobrança gerada para esta parcela ainda.
           </CardContent>
         </Card>
       ) : null}
+
+      {/* Histórico */}
+      {charges && charges.length > 1 && (
+        <div>
+          <button
+            onClick={() => setShowHistory(v => !v)}
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronDown className={`size-4 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
+            Histórico de cobranças ({charges.length - 1} anterior{charges.length > 2 ? 'es' : ''})
+          </button>
+
+          {showHistory && (
+            <div className="mt-3 space-y-2">
+              {charges.slice(1).map(c => (
+                <div key={c.id} className="rounded-lg border px-4 py-3 text-sm flex items-center justify-between">
+                  <div>
+                    <span className="font-medium capitalize">{c.tipo} #{c.id}</span>
+                    <span className="text-muted-foreground ml-2">{formatCurrency(Number(c.amount))}{c.valorEncargos ? ` + ${formatCurrency(Number(c.valorEncargos))} encargos` : ''}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <ChargeStatusBadge status={c.status} expiresAt={c.expiresAt} />
+                    <span className="text-xs text-muted-foreground">{formatDate(c.createdAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
