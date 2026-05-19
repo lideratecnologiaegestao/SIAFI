@@ -14,8 +14,13 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'SIAFI — Sistema Integrado de Apoio Financeiro',
-  description: 'Sistema Integrado de Apoio Financeiro — Lidera',
+  title: 'SIAFI — Sistema de Agilidade Financeira',
+  description: 'Sistema de Agilidade Financeira — Lidera',
+  icons: {
+    icon: '/favicon.png',
+    shortcut: '/favicon.png',
+    apple: '/favicon.png',
+  },
 }
 
 export default function RootLayout({

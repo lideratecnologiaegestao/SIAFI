@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -119,15 +120,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
         style={{ backgroundColor: '#0f172a' }}
       >
-        <div className="flex h-16 items-center justify-between px-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">S</span>
-            </div>
-            <div>
-              <p className="text-white font-bold text-sm tracking-wide">SIAFI</p>
-              <p className="text-slate-400 text-[10px]">Apoio Financeiro</p>
-            </div>
+        <div className="flex h-16 items-center justify-between px-4 border-b border-white/10">
+          <div className="bg-white rounded-lg px-3 py-1.5 flex items-center">
+            <Image
+              src="/logo.png"
+              alt="SIAFI"
+              width={130}
+              height={36}
+              className="object-contain h-8 w-auto"
+              priority
+            />
           </div>
           <button
             onClick={onClose}
