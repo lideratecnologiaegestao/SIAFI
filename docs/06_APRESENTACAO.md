@@ -60,7 +60,8 @@ Antes do SIAFI, a operação dependia de:
 | Módulos de back-end | **16 módulos** |
 | Perfis de acesso | **5 roles** |
 | Operações automatizadas | **3 cron jobs diários** |
-| Tecnologias de integração | **PIX · WhatsApp · E-mail** |
+| Filas de processamento | **2 queues BullMQ** |
+| Tecnologias de integração | **PIX · WhatsApp · E-mail · Supabase** |
 
 &nbsp;
 
@@ -190,31 +191,62 @@ Antes do SIAFI, a operação dependia de:
 
 &nbsp;
 
-```
-                    ┌─────────────────────────────────┐
-                    │  https://financeiro.lidera.app.br│
-                    └──────────────┬──────────────────┘
-                                   │
-                            ┌──────▼──────┐
-                            │    Nginx    │
-                            │  (SSL/TLS)  │
-                            └──────┬──────┘
-                    ┌──────────────┼──────────────┐
-                    ▼                             ▼
-            ┌──────────────┐             ┌──────────────┐
-            │  Next.js 16  │             │  NestJS 10   │
-            │  :4011       │───JWT──────►│  :4010       │
-            │  (Frontend)  │            │  (Backend)   │
-            └──────────────┘             └──────┬───────┘
-                                                │ Prisma 5
-                                         ┌──────▼────────────────────────┐
-                                         │   Supabase (sa-east-1)        │
-                                         │                               │
-                                         │  PostgreSQL   ← dados         │
-                                         │  Auth/GoTrue  ← sessões + MFA │
-                                         │  Storage      ← documentos    │
-                                         │  Realtime     ← eventos live  │
-                                         └───────────────────────────────┘
+```mermaid
+graph TD
+    User((Usuário)) --> Nginx
+
+    subgraph "Windows Server 2022 — Lidera"
+        Nginx["Nginx 1.28\nSSL/TLS · Gzip · Proxy\nfin.lidera.app.br"]
+
+        Nginx -->|"/* :4011"| Frontend
+        Nginx -->|"/api/* :4010"| Backend
+        Nginx -->|"/admin/queues :4010"| BullBoard
+
+        subgraph "Frontend — Next.js 16 :4011"
+            Frontend["Next.js 16 · App Router\n25 páginas · AuthContext\nuseRealtimeDashboard"]
+            BullBoard["BullBoard\nQueue Monitor"]
+        end
+
+        subgraph "Backend — NestJS 10 :4010 · 16 módulos"
+            Backend["API REST\nJwtAuthGuard · RolesGuard\nValidationPipe · AuditInterceptor"]
+            Workers["BullMQ Workers\nnotif-queue · payment-queue\n(retry 3–5x · backoff exp.)"]
+            Cron["Cron Jobs\n08h marcaAtraso\n09h lembretes · 10h cobranças"]
+        end
+
+        NSSM["NSSM · Windows Services\nSIAFI-API · SIAFI-WEB"]
+        NSSM -.->|"gerencia processos"| Frontend
+        NSSM -.->|"gerencia processos"| Backend
+    end
+
+    Redis[("Redis\nUpstash Cloud\nBullMQ backend")]
+
+    subgraph "Supabase Cloud — sa-east-1"
+        SAuth["Auth / GoTrue\nJWT HS256 · MFA TOTP\nOAuth Google"]
+        SDB[("PostgreSQL\n16 tabelas + RLS\nPrisma ORM")]
+        SStorage[("Storage\nclient-documents\nURLs assinadas 1h")]
+        SRealtime["Realtime\nWebSocket\ninstallments · payments\ntransactions"]
+    end
+
+    MP["Mercado Pago\nQR Code PIX"]
+    WA["Evolution API\nWhatsApp"]
+    Mail["SMTP\nE-mail"]
+
+    Frontend -->|"REST + Bearer JWT Supabase"| Nginx
+    Frontend -.->|"sessão · MFA · OAuth"| SAuth
+    Frontend -.->|"eventos ao vivo"| SRealtime
+
+    Backend -->|"Prisma ORM"| SDB
+    Backend -->|"service_role key\ncreateUser · syncRole · signOut"| SAuth
+    Backend -->|"uploadFile()\ncreateSignedUrl()"| SStorage
+
+    Backend -->|"enfileira jobs"| Redis
+    Redis -->|"dequeue"| Workers
+    Workers -->|"cobranças / lembretes"| WA
+    Workers -->|"notificações"| Mail
+    Cron -->|"enfileira"| Redis
+
+    Backend -->|"criar QR Code PIX"| MP
+    MP -.->|"POST /api/webhook/mp\nconfirmação pagamento"| Nginx
 ```
 
 ### Stack Tecnológico
@@ -227,6 +259,7 @@ Antes do SIAFI, a operação dependia de:
 | **Auth** | Supabase GoTrue (JWT HS256) | MFA TOTP, OAuth Google, sessões gerenciadas |
 | **Storage** | Supabase Storage | Documentos privados na nuvem, URLs assinadas |
 | **Realtime** | Supabase Realtime | Dashboard atualizado automaticamente via WebSocket |
+| **Filas** | BullMQ + Redis (Upstash) | Notificações e pagamentos assíncronos com retry |
 | **Deploy** | NSSM + Windows Server | Ambiente de produção estável |
 | **UI** | Tailwind CSS 4 + shadcn/ui | Interface moderna e responsiva |
 
@@ -260,7 +293,8 @@ Antes do SIAFI, a operação dependia de:
 
 | Integração | Finalidade | Status |
 |-----------|-----------|--------|
-| **Supabase** | PostgreSQL · Auth · Storage · Realtime | ✅ Ativo |
+| **Supabase** | PostgreSQL · Auth (MFA/OAuth) · Storage · Realtime | ✅ Ativo |
+| **Redis (Upstash)** | Backend das filas BullMQ · processamento assíncrono | ✅ Ativo |
 | **Mercado Pago** | Geração de QR Code PIX · Webhook de pagamento | Configurável |
 | **Evolution API** | Envio de cobranças e lembretes via WhatsApp | Configurável |
 | **SMTP** | Notificações por e-mail | Configurável |

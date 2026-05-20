@@ -14,19 +14,80 @@ NestJS com módulos bem delimitados. Cada módulo tem seu próprio controller, s
 
 ---
 
+## Diagrama Geral
+
+```mermaid
+graph TD
+    User((Usuário)) --> Nginx
+
+    subgraph "Windows Server 2022 — Lidera"
+        Nginx["Nginx 1.28\nSSL/TLS · Gzip · Proxy\nfin.lidera.app.br"]
+
+        Nginx -->|"/* :4011"| Frontend
+        Nginx -->|"/api/* :4010"| Backend
+        Nginx -->|"/admin/queues :4010"| BullBoard
+
+        subgraph "Frontend — Next.js 16 :4011"
+            Frontend["Next.js 16 · App Router\n25 páginas · AuthContext\nuseRealtimeDashboard"]
+            BullBoard["BullBoard\nQueue Monitor"]
+        end
+
+        subgraph "Backend — NestJS 10 :4010 · 16 módulos"
+            Backend["API REST\nJwtAuthGuard · RolesGuard\nValidationPipe · AuditInterceptor"]
+            Workers["BullMQ Workers\nnotif-queue · payment-queue\n(retry 3–5x · backoff exp.)"]
+            Cron["Cron Jobs\n08h marcaAtraso\n09h lembretes · 10h cobranças"]
+        end
+
+        NSSM["NSSM · Windows Services\nSIAFI-API · SIAFI-WEB"]
+        NSSM -.->|"gerencia processos"| Frontend
+        NSSM -.->|"gerencia processos"| Backend
+    end
+
+    Redis[("Redis\nUpstash Cloud\nBullMQ backend")]
+
+    subgraph "Supabase Cloud — sa-east-1"
+        SAuth["Auth / GoTrue\nJWT HS256 · MFA TOTP\nOAuth Google"]
+        SDB[("PostgreSQL\n16 tabelas + RLS\nPrisma ORM")]
+        SStorage[("Storage\nclient-documents\nURLs assinadas 1h")]
+        SRealtime["Realtime\nWebSocket\ninstallments · payments\ntransactions"]
+    end
+
+    MP["Mercado Pago\nQR Code PIX"]
+    WA["Evolution API\nWhatsApp"]
+    Mail["SMTP\nE-mail"]
+
+    Frontend -->|"REST + Bearer JWT Supabase"| Nginx
+    Frontend -.->|"sessão · MFA · OAuth"| SAuth
+    Frontend -.->|"eventos ao vivo"| SRealtime
+
+    Backend -->|"Prisma ORM"| SDB
+    Backend -->|"service_role key\ncreateUser · syncRole · signOut"| SAuth
+    Backend -->|"uploadFile()\ncreateSignedUrl()"| SStorage
+
+    Backend -->|"enfileira jobs"| Redis
+    Redis -->|"dequeue"| Workers
+    Workers -->|"cobranças / lembretes"| WA
+    Workers -->|"notificações"| Mail
+    Cron -->|"enfileira"| Redis
+
+    Backend -->|"criar QR Code PIX"| MP
+    MP -.->|"POST /api/webhook/mp\nconfirmação pagamento"| Nginx
+```
+
+**Legenda:** seta sólida = chamada direta · seta tracejada = evento externo / callback / gerenciamento
+
+---
+
 ## Fluxo de Requisição
 
 ```
 Cliente (browser/mobile)
     │
     ▼
-Next.js :4011
-    │  Client Components → axios com Supabase JWT no header
-    │
-    ▼
-Nginx (reverse proxy)
-    │  /api/* → localhost:4010 (NestJS)
-    │  /*     → localhost:4011 (Next.js)
+Nginx :443 (SSL termination, gzip, headers de segurança)
+    │  /api/*          → localhost:4010 (NestJS)
+    │  /admin/queues   → localhost:4010 (BullBoard)
+    │  /*              → localhost:4011 (Next.js)
     │
     ▼
 NestJS :4010
@@ -37,6 +98,7 @@ NestJS :4010
     │
     ▼
 Service → Prisma → PostgreSQL (Supabase Cloud sa-east-1)
+       → BullMQ  → Redis (Upstash) → Workers → WhatsApp / E-mail
                   + Supabase Auth (GoTrue) — sessões e MFA
                   + Supabase Storage — documentos de clientes
                   + Supabase Realtime — atualizações ao vivo
@@ -78,6 +140,27 @@ Service → Prisma → PostgreSQL (Supabase Cloud sa-east-1)
    → POST /api/auth/logout
    → Supabase Auth invalida sessão (signOut)
    → Cookie removido
+```
+
+---
+
+## Filas Assíncronas (BullMQ + Redis)
+
+```
+Backend (Producer)
+    │
+    ├── notif-queue  → Workers → Evolution API (WhatsApp)
+    │                         → SMTP (E-mail)
+    │
+    └── payment-queue → Workers → processamento de confirmações
+    
+Cron Jobs → enfileiram jobs de cobrança em notif-queue
+
+Configuração:
+  - Redis: Upstash Cloud (TLS)
+  - Retry: notif-queue 3x · payment-queue 5x
+  - Backoff: exponencial (5s / 10s base)
+  - Monitor: BullBoard em /admin/queues (autenticado)
 ```
 
 ---

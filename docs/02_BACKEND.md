@@ -225,8 +225,42 @@ Retorna:
 | Job | Horário | Função |
 |-----|---------|--------|
 | markOverdue | Diário 08:00 | Marca parcelas vencidas como `atrasado` |
-| sendReminders | Diário 09:00 | Envia lembretes de parcelas próximas |
-| sendOverdueNotices | Diário 10:00 | Envia cobranças de parcelas atrasadas |
+| sendReminders | Diário 09:00 | Enfileira lembretes de parcelas próximas em `notif-queue` |
+| sendOverdueNotices | Diário 10:00 | Enfileira cobranças de parcelas atrasadas em `notif-queue` |
+
+Os jobs de envio não chamam Evolution API / SMTP diretamente — enfileiram no Redis via BullMQ para processamento assíncrono com retry.
+
+---
+
+## Filas Assíncronas (QueueModule / BullMQ)
+
+```
+backend/src/modules/queue/
+├── queue.module.ts          Registra filas + BullBoard middleware
+├── queue.constants.ts       QUEUE_FINANCE_NOTIFICATIONS, QUEUE_PAYMENT_PROCESSING
+├── notification.processor.ts  Worker: WhatsApp (Evolution API) + E-mail (SMTP)
+├── payment.processor.ts       Worker: confirmações de pagamento
+└── admin-queue.middleware.ts  Autenticação da rota /admin/queues
+```
+
+| Fila | Constante | Tentativas | Backoff |
+|------|-----------|-----------|---------|
+| `notif-queue` | `QUEUE_FINANCE_NOTIFICATIONS` | 3x | 5s exponencial |
+| `payment-queue` | `QUEUE_PAYMENT_PROCESSING` | 5x | 10s exponencial |
+
+**Monitor:** BullBoard disponível em `/admin/queues` (rota protegida por middleware de autenticação).
+
+**Injeção do producer:**
+```typescript
+@InjectQueue(QUEUE_FINANCE_NOTIFICATIONS)
+private readonly notifQueue: Queue,
+
+// Enfileirar job:
+await this.notifQueue.add('send-whatsapp', { clientId, mensagem }, { attempts: 3 })
+```
+
+**Redis:** configurado via `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_TLS` no `.env`.
+Para produção, usar Upstash com TLS habilitado.
 
 ---
 
