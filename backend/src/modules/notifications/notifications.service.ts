@@ -1,7 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
-import axios from 'axios';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  QUEUE_FINANCE_NOTIFICATIONS,
+  JOB_WA_LEMBRETE_VENCIMENTO,
+  JOB_WA_COBRANCA_ATRASO,
+  JOB_WA_CONFIRMACAO_PAGAMENTO,
+  JOB_WA_PORTAL_ATIVADO,
+  JOB_EMAIL_LEMBRETE,
+  JOB_EMAIL_CONFIRMACAO,
+  JOB_EMAIL_PORTAL_ATIVADO,
+} from '../queue/queue.constants';
+import type { NotificationJobData } from '../queue/queue.interfaces';
 
 interface LogNotificationData {
   clientId: number;
@@ -37,64 +48,118 @@ export interface NotificationList {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectQueue(QUEUE_FINANCE_NOTIFICATIONS)
+    private readonly notificationsQueue: Queue<NotificationJobData>,
+  ) {}
 
-  async sendWhatsApp(phone: string, message: string): Promise<boolean> {
-    const apiUrl = process.env.WHATSAPP_API_URL;
-    const apiKey = process.env.WHATSAPP_API_KEY;
-    const instance = process.env.WHATSAPP_INSTANCE;
+  async enviarLembreteVencimento(clientId: number, installmentId: number): Promise<void> {
+    const installment = await this.prisma.installment.findUnique({
+      where: { id: installmentId },
+      include: { loan: { include: { client: { select: { id: true, nome: true, whatsapp: true, email: true } } } } },
+    });
+    if (!installment) return;
 
-    if (!apiUrl || !apiKey || !instance) {
-      this.logger.warn('WhatsApp not configured, skipping');
-      return false;
+    const client = installment.loan.client;
+    const today = new Date().toISOString().split('T')[0];
+    const dtVenc = new Intl.DateTimeFormat('pt-BR').format(new Date(installment.dataVencimento));
+
+    const jobData: NotificationJobData = {
+      clientId: client.id,
+      clienteNome: client.nome,
+      clienteWhatsapp: client.whatsapp ?? undefined,
+      clienteEmail: client.email ?? undefined,
+      installmentId,
+      loanId: installment.loanId,
+      valorParcela: Number(installment.valor),
+      dataVencimento: dtVenc,
+    };
+
+    if (client.whatsapp) {
+      await this.notificationsQueue.add(JOB_WA_LEMBRETE_VENCIMENTO, jobData, {
+        jobId: `lembrete-wa-${installmentId}-${today}`,
+      });
     }
-
-    const phoneClean = phone.replace(/\D/g, '');
-    const phoneWithCountry = phoneClean.startsWith('55') ? phoneClean : `55${phoneClean}`;
-
-    try {
-      await axios.post(
-        `${apiUrl}/message/sendText/${instance}`,
-        { number: phoneWithCountry, text: message },
-        { headers: { apikey: apiKey }, timeout: 10000 },
-      );
-      return true;
-    } catch (err) {
-      this.logger.error(`WhatsApp send failed to ${phone}`, err);
-      return false;
+    if (client.email) {
+      await this.notificationsQueue.add(JOB_EMAIL_LEMBRETE, jobData, {
+        jobId: `lembrete-email-${installmentId}-${today}`,
+      });
     }
   }
 
-  async sendEmail(to: string, subject: string, html: string): Promise<boolean> {
-    const host = process.env.MAIL_HOST;
-    const port = Number(process.env.MAIL_PORT ?? 587);
-    const user = process.env.MAIL_USER;
-    const pass = process.env.MAIL_PASS;
-    const fromName = process.env.MAIL_FROM_NAME ?? 'SIAFI';
+  async enviarCobrancaAtraso(clientId: number, installmentId: number): Promise<void> {
+    const installment = await this.prisma.installment.findUnique({
+      where: { id: installmentId },
+      include: { loan: { include: { client: { select: { id: true, nome: true, whatsapp: true } } } } },
+    });
+    if (!installment) return;
 
-    if (!host || !user || !pass) {
-      this.logger.warn('Email not configured, skipping');
-      return false;
+    const client = installment.loan.client;
+    if (!client.whatsapp) return;
+
+    await this.notificationsQueue.add(
+      JOB_WA_COBRANCA_ATRASO,
+      {
+        clientId: client.id,
+        clienteNome: client.nome,
+        clienteWhatsapp: client.whatsapp,
+        installmentId,
+        loanId: installment.loanId,
+        valorParcela: Number(installment.valor),
+      },
+      { jobId: `cobranca-${installmentId}-${new Date().toISOString().split('T')[0]}` },
+    );
+  }
+
+  async enviarConfirmacaoPagamento(clientId: number, valorPago: number): Promise<void> {
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, nome: true, whatsapp: true, email: true },
+    });
+    if (!client) return;
+
+    const jobData: NotificationJobData = {
+      clientId: client.id,
+      clienteNome: client.nome,
+      clienteWhatsapp: client.whatsapp ?? undefined,
+      clienteEmail: client.email ?? undefined,
+      valorParcela: valorPago,
+    };
+
+    const now = Date.now();
+    if (client.whatsapp) {
+      await this.notificationsQueue.add(JOB_WA_CONFIRMACAO_PAGAMENTO, jobData, {
+        jobId: `confirmacao-wa-${clientId}-${now}`,
+      });
     }
-
-    try {
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
+    if (client.email) {
+      await this.notificationsQueue.add(JOB_EMAIL_CONFIRMACAO, jobData, {
+        jobId: `confirmacao-email-${clientId}-${now}`,
       });
+    }
+  }
 
-      await transporter.sendMail({
-        from: `"${fromName}" <${user}>`,
-        to,
-        subject,
-        html,
-      });
-      return true;
-    } catch (err) {
-      this.logger.error(`Email send failed to ${to}`, err);
-      return false;
+  async enviarAcessoPortal(clientId: number, senhaTemporaria: string): Promise<void> {
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, nome: true, whatsapp: true, email: true },
+    });
+    if (!client) return;
+
+    const jobData: NotificationJobData = {
+      clientId: client.id,
+      clienteNome: client.nome,
+      clienteWhatsapp: client.whatsapp ?? undefined,
+      clienteEmail: client.email ?? undefined,
+      senhaTemporaria,
+    };
+
+    if (client.whatsapp) {
+      await this.notificationsQueue.add(JOB_WA_PORTAL_ATIVADO, jobData);
+    }
+    if (client.email) {
+      await this.notificationsQueue.add(JOB_EMAIL_PORTAL_ATIVADO, jobData);
     }
   }
 
@@ -110,75 +175,6 @@ export class NotificationsService {
         sentAt: data.status === 'enviado' ? new Date() : null,
       },
     });
-  }
-
-  async notifyOverdue(installmentId: number): Promise<void> {
-    const installment = await this.prisma.installment.findUnique({
-      where: { id: installmentId },
-      include: {
-        loan: {
-          include: {
-            client: { select: { id: true, nome: true, whatsapp: true, email: true } },
-          },
-        },
-      },
-    });
-
-    if (!installment) return;
-
-    const client = installment.loan.client;
-
-    const dtVenc = new Intl.DateTimeFormat('pt-BR').format(new Date(installment.dataVencimento));
-    const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
-      Number(installment.valor),
-    );
-
-    const message =
-      `Olá ${client.nome}! ` +
-      `Sua parcela #${installment.numero} no valor de ${valor}, ` +
-      `vencida em ${dtVenc}, está em aberto. ` +
-      `Entre em contato para regularizar. SIAFI`;
-
-    let sent = false;
-
-    if (client.whatsapp) {
-      sent = await this.sendWhatsApp(client.whatsapp, message);
-    }
-
-    await this.logNotification({
-      clientId: client.id,
-      loanId: installment.loanId,
-      tipo: 'whatsapp',
-      assunto: `Parcela #${installment.numero} vencida`,
-      mensagem: message,
-      status: sent ? 'enviado' : 'erro',
-    });
-
-    if (client.email) {
-      const html = `
-        <h2>Parcela em Atraso — SIAFI</h2>
-        <p>Olá, <strong>${client.nome}</strong>!</p>
-        <p>Sua parcela <strong>#${installment.numero}</strong> no valor de <strong>${valor}</strong>,
-        com vencimento em <strong>${dtVenc}</strong>, está em aberto.</p>
-        <p>Entre em contato para regularizar sua situação.</p>
-        <hr><p style="color:#666;font-size:12px">SIAFI — Sistema Integrado de Apoio Financeiro</p>
-      `;
-
-      const emailSent = await this.sendEmail(
-        client.email,
-        `Parcela #${installment.numero} em atraso — SIAFI`,
-        html,
-      );
-
-      await this.logNotification({
-        clientId: client.id,
-        loanId: installment.loanId,
-        tipo: 'email',
-        assunto: `Parcela #${installment.numero} vencida`,
-        mensagem: message,
-        status: emailSent ? 'enviado' : 'erro',
-      });
-    }
   }
 
   async findAll(page = 1, limit = 20, clientId?: number): Promise<NotificationList> {

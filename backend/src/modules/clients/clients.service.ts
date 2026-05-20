@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Client, Prisma } from '@prisma/client';
+import { extname } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SupabaseService } from '../../supabase/supabase.service';
 import { PaginatedResponse, paginate } from '../../common/dto/paginated-response.dto';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ClientFilterDto } from './dto/client-filter.dto';
+
+const BUCKET = 'client-documents';
 
 export interface UploadedFiles {
   foto?: Express.Multer.File[];
@@ -12,9 +16,18 @@ export interface UploadedFiles {
   comprovante?: Express.Multer.File[];
 }
 
+export interface DocumentUrls {
+  fotoUrl?: string;
+  rgUrl?: string;
+  comprovanteUrl?: string;
+}
+
 @Injectable()
 export class ClientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly supabase: SupabaseService,
+  ) {}
 
   async findAll(filters: ClientFilterDto): Promise<PaginatedResponse<Client>> {
     const { page, limit, search, status } = filters;
@@ -50,7 +63,10 @@ export class ClientsService {
   }
 
   async findById(id: number): Promise<Client> {
-    const client = await this.prisma.client.findUnique({ where: { id } });
+    const client = await this.prisma.client.findUnique({
+      where: { id },
+      include: { loans: { orderBy: { createdAt: 'asc' } } },
+    });
     if (!client) {
       throw new NotFoundException(`Cliente com id ${id} não encontrado`);
     }
@@ -58,8 +74,6 @@ export class ClientsService {
   }
 
   async create(dto: CreateClientDto, files?: UploadedFiles): Promise<Client> {
-    const filePaths = this.extractFilePaths(files);
-
     const data: Prisma.ClientCreateInput = {
       nome: dto.nome,
       cpf: dto.cpf ?? null,
@@ -75,18 +89,22 @@ export class ClientsService {
       cep: dto.cep ?? null,
       observacoes: dto.observacoes ?? null,
       notificacoesEmail: dto.notificacoesEmail ?? true,
-      ...filePaths,
     };
 
-    return this.prisma.client.create({ data });
+    const client = await this.prisma.client.create({ data });
+
+    if (files && Object.values(files).some((f) => f?.length)) {
+      const paths = await this.uploadFiles(client.id, files);
+      return this.prisma.client.update({ where: { id: client.id }, data: paths });
+    }
+
+    return client;
   }
 
   async update(id: number, dto: UpdateClientDto, files?: UploadedFiles): Promise<Client> {
     await this.findById(id);
 
-    const filePaths = this.extractFilePaths(files);
-
-    const data: Record<string, unknown> = { ...filePaths };
+    const data: Record<string, unknown> = {};
 
     if (dto.nome !== undefined) data.nome = dto.nome;
     if (dto.cpf !== undefined) data.cpf = dto.cpf;
@@ -102,6 +120,12 @@ export class ClientsService {
     if (dto.cep !== undefined) data.cep = dto.cep;
     if (dto.observacoes !== undefined) data.observacoes = dto.observacoes;
     if (dto.notificacoesEmail !== undefined) data.notificacoesEmail = dto.notificacoesEmail;
+    if (dto.active !== undefined) data.active = dto.active;
+
+    if (files && Object.values(files).some((f) => f?.length)) {
+      const paths = await this.uploadFiles(id, files);
+      Object.assign(data, paths);
+    }
 
     return this.prisma.client.update({ where: { id }, data });
   }
@@ -139,22 +163,71 @@ export class ClientsService {
     });
   }
 
-  private extractFilePaths(files?: UploadedFiles): {
-    fotoPath?: string;
-    rgPath?: string;
-    comprovantePath?: string;
-  } {
+  async getDocumentUrls(id: number): Promise<DocumentUrls> {
+    const client = await this.prisma.client.findUnique({
+      where: { id },
+      select: { fotoPath: true, rgPath: true, comprovantePath: true },
+    });
+    if (!client) throw new NotFoundException(`Cliente com id ${id} não encontrado`);
+
+    const urls: DocumentUrls = {};
+    const EXPIRY = 3600;
+
+    await Promise.all([
+      client.fotoPath
+        ? this.supabase.createSignedUrl(BUCKET, client.fotoPath, EXPIRY)
+            .then((url) => { urls.fotoUrl = url })
+            .catch(() => {})
+        : Promise.resolve(),
+      client.rgPath
+        ? this.supabase.createSignedUrl(BUCKET, client.rgPath, EXPIRY)
+            .then((url) => { urls.rgUrl = url })
+            .catch(() => {})
+        : Promise.resolve(),
+      client.comprovantePath
+        ? this.supabase.createSignedUrl(BUCKET, client.comprovantePath, EXPIRY)
+            .then((url) => { urls.comprovanteUrl = url })
+            .catch(() => {})
+        : Promise.resolve(),
+    ]);
+
+    return urls;
+  }
+
+  private async uploadFiles(
+    clientId: number,
+    files: UploadedFiles,
+  ): Promise<{ fotoPath?: string; rgPath?: string; comprovantePath?: string }> {
     const paths: { fotoPath?: string; rgPath?: string; comprovantePath?: string } = {};
 
-    if (files?.foto?.[0]) {
-      paths.fotoPath = `uploads/clients/${files.foto[0].filename}`;
-    }
-    if (files?.rg?.[0]) {
-      paths.rgPath = `uploads/clients/${files.rg[0].filename}`;
-    }
-    if (files?.comprovante?.[0]) {
-      paths.comprovantePath = `uploads/clients/${files.comprovante[0].filename}`;
-    }
+    await Promise.all([
+      files.foto?.[0]
+        ? this.supabase.uploadFile(
+            BUCKET,
+            `clients/${clientId}/foto${extname(files.foto[0].originalname) || '.jpg'}`,
+            files.foto[0].buffer,
+            files.foto[0].mimetype,
+          ).then((p) => { paths.fotoPath = p })
+        : Promise.resolve(),
+
+      files.rg?.[0]
+        ? this.supabase.uploadFile(
+            BUCKET,
+            `clients/${clientId}/rg${extname(files.rg[0].originalname) || '.jpg'}`,
+            files.rg[0].buffer,
+            files.rg[0].mimetype,
+          ).then((p) => { paths.rgPath = p })
+        : Promise.resolve(),
+
+      files.comprovante?.[0]
+        ? this.supabase.uploadFile(
+            BUCKET,
+            `clients/${clientId}/comprovante${extname(files.comprovante[0].originalname) || '.jpg'}`,
+            files.comprovante[0].buffer,
+            files.comprovante[0].mimetype,
+          ).then((p) => { paths.comprovantePath = p })
+        : Promise.resolve(),
+    ]);
 
     return paths;
   }

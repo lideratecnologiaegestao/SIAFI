@@ -1,12 +1,13 @@
 'use client'
 
-import { useForm } from 'react-hook-form'
+import { useRef, useState } from 'react'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save } from 'lucide-react'
+import { ArrowLeft, Save, Upload, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,9 +16,29 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import api from '@/lib/api'
 
+function formatCpfCnpj(raw: string): string {
+  const d = raw.replace(/\D/g, '').slice(0, 14)
+  if (d.length <= 11) {
+    return d
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
+  }
+  return d
+    .replace(/(\d{2})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1/$2')
+    .replace(/(\d{4})(\d{1,2})$/, '$1-$2')
+}
+
 const schema = z.object({
   nome: z.string().min(3, 'Nome deve ter ao menos 3 caracteres'),
-  cpf: z.string().min(11, 'CPF inválido').max(14),
+  cpf: z.string()
+    .min(1, 'CPF ou CNPJ obrigatório')
+    .refine((v) => {
+      const d = v.replace(/\D/g, '')
+      return d.length === 11 || d.length === 14
+    }, 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido'),
   rg: z.string().optional(),
   dataNascimento: z.string().optional(),
   email: z.string().email('E-mail inválido').optional().or(z.literal('')),
@@ -35,16 +56,76 @@ type FormData = z.infer<typeof schema>
 
 const UF_LIST = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO']
 
+function FileInput({
+  label,
+  name,
+  accept,
+  file,
+  onChange,
+}: {
+  label: string
+  name: string
+  accept: string
+  file: File | null
+  onChange: (f: File | null) => void
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2 shrink-0"
+          onClick={() => ref.current?.click()}
+        >
+          <Upload className="size-3.5" />
+          {file ? 'Trocar' : 'Selecionar'}
+        </Button>
+        {file && (
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground min-w-0">
+            <span className="truncate">{file.name}</span>
+            <button type="button" onClick={() => { onChange(null); if (ref.current) ref.current.value = '' }}>
+              <X className="size-3.5 shrink-0 hover:text-destructive" />
+            </button>
+          </div>
+        )}
+        {!file && <span className="text-xs text-muted-foreground">Nenhum arquivo selecionado</span>}
+      </div>
+      <input
+        ref={ref}
+        type="file"
+        name={name}
+        accept={accept}
+        className="hidden"
+        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+      />
+    </div>
+  )
+}
+
 export default function NovoClientePage() {
   const router = useRouter()
   const qc = useQueryClient()
+  const [foto, setFoto] = useState<File | null>(null)
+  const [rgFile, setRgFile] = useState<File | null>(null)
+  const [comprovante, setComprovante] = useState<File | null>(null)
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, control, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
   })
 
   const mutation = useMutation({
-    mutationFn: (data: FormData) => api.post('/clients', data),
+    mutationFn: (data: FormData) => {
+      const fd = new FormData()
+      Object.entries(data).forEach(([k, v]) => { if (v !== undefined && v !== '') fd.append(k, String(v)) })
+      if (foto) fd.append('foto', foto)
+      if (rgFile) fd.append('rg', rgFile)
+      if (comprovante) fd.append('comprovante', comprovante)
+      return api.post('/clients', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['clients'] })
       router.push('/clientes')
@@ -83,8 +164,21 @@ export default function NovoClientePage() {
               {errors.nome && <p className="text-xs text-destructive">{errors.nome.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cpf">CPF *</Label>
-              <Input id="cpf" {...register('cpf')} placeholder="000.000.000-00" />
+              <Label htmlFor="cpf">CPF / CNPJ *</Label>
+              <Controller
+                name="cpf"
+                control={control}
+                render={({ field }) => (
+                  <Input
+                    id="cpf"
+                    value={formatCpfCnpj(field.value ?? '')}
+                    onChange={(e) => field.onChange(formatCpfCnpj(e.target.value))}
+                    onBlur={field.onBlur}
+                    placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                    maxLength={18}
+                  />
+                )}
+              />
               {errors.cpf && <p className="text-xs text-destructive">{errors.cpf.message}</p>}
             </div>
             <div className="space-y-1.5">
@@ -138,6 +232,33 @@ export default function NovoClientePage() {
                 {UF_LIST.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
               </Select>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">Documentos</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <FileInput
+              label="Foto do Cliente"
+              name="foto"
+              accept="image/jpeg,image/png,image/webp"
+              file={foto}
+              onChange={setFoto}
+            />
+            <FileInput
+              label="RG (frente)"
+              name="rg"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              file={rgFile}
+              onChange={setRgFile}
+            />
+            <FileInput
+              label="Comprovante de Endereço"
+              name="comprovante"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              file={comprovante}
+              onChange={setComprovante}
+            />
           </CardContent>
         </Card>
 

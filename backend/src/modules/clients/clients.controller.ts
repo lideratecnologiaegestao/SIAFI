@@ -13,8 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -24,21 +23,13 @@ import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ClientFilterDto } from './dto/client-filter.dto';
 
-const fileStorage = diskStorage({
-  destination: './uploads/clients',
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
-  },
-});
-
 const uploadInterceptor = FileFieldsInterceptor(
   [
     { name: 'foto', maxCount: 1 },
     { name: 'rg', maxCount: 1 },
     { name: 'comprovante', maxCount: 1 },
   ],
-  { storage: fileStorage },
+  { storage: memoryStorage() },
 );
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -53,15 +44,21 @@ export class ClientsController {
   }
 
   @Get('stats')
-  @Roles('admin', 'financeiro')
+  @Roles('admin', 'financeiro', 'caixa')
   getStats() {
     return this.clientsService.getStats();
   }
 
   @Get('quitados')
-  @Roles('admin', 'financeiro')
+  @Roles('admin', 'financeiro', 'caixa')
   findQuitados() {
     return this.clientsService.findQuitados();
+  }
+
+  @Get(':id/document-urls')
+  @Roles('admin', 'financeiro', 'caixa')
+  getDocumentUrls(@Param('id', ParseIntPipe) id: number) {
+    return this.clientsService.getDocumentUrls(id);
   }
 
   @Get(':id')

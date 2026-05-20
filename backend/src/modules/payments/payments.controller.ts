@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -25,6 +26,12 @@ interface AuthUser {
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
+
+  @Get()
+  @Roles('admin', 'financeiro', 'caixa')
+  findAll(@Query('search') search?: string) {
+    return this.paymentsService.findAll(search);
+  }
 
   @Post()
   @Roles('admin', 'financeiro', 'caixa')

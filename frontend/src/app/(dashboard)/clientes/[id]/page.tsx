@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Pencil, Phone, Mail, MapPin, FileText, CreditCard } from 'lucide-react'
+import { ArrowLeft, Pencil, Phone, Mail, MapPin, FileText, CreditCard, FolderOpen, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +16,14 @@ interface Client {
   email: string; whatsapp: string; telefone: string; endereco: string
   bairro: string; cidade: string; estado: string; cep: string
   active: boolean; observacoes: string; createdAt: string
+  fotoPath?: string; rgPath?: string; comprovantePath?: string
   loans: Array<{ id: number; valor: number; numeroParcelas: number; status: string; dataInicio: string }>
+}
+
+interface DocumentUrls {
+  fotoUrl?: string
+  rgUrl?: string
+  comprovanteUrl?: string
 }
 
 export default function ClienteDetalhePage() {
@@ -25,6 +32,15 @@ export default function ClienteDetalhePage() {
   const { data: client, isLoading, isError } = useQuery({
     queryKey: ['clients', id],
     queryFn: () => api.get<Client>(`/clients/${id}`).then((r) => r.data),
+  })
+
+  const hasDocuments = !!(client?.fotoPath || client?.rgPath || client?.comprovantePath)
+
+  const { data: docUrls } = useQuery<DocumentUrls>({
+    queryKey: ['clients', id, 'document-urls'],
+    queryFn: () => api.get<DocumentUrls>(`/clients/${id}/document-urls`).then((r) => r.data),
+    enabled: hasDocuments,
+    staleTime: 50 * 60 * 1000, // refresh before signed URL expires (1h)
   })
 
   if (isLoading) return (
@@ -86,6 +102,57 @@ export default function ClienteDetalhePage() {
             <CardContent className="text-sm space-y-1">
               {client.endereco && <p>{client.endereco}{client.bairro ? `, ${client.bairro}` : ''}</p>}
               {(client.cidade || client.estado) && <p>{[client.cidade, client.estado].filter(Boolean).join(' - ')}{client.cep ? ` · CEP ${formatCEP(client.cep)}` : ''}</p>}
+            </CardContent>
+          </Card>
+        )}
+
+        {hasDocuments && (
+          <Card className="md:col-span-2">
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><FolderOpen className="size-4" />Documentos</CardTitle></CardHeader>
+            <CardContent>
+              {docUrls ? (
+                <div className="flex flex-wrap gap-3">
+                  {docUrls.fotoUrl && (
+                    <a
+                      href={docUrls.fotoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                    >
+                      <ExternalLink className="size-3.5 text-muted-foreground" />
+                      Foto do Cliente
+                    </a>
+                  )}
+                  {docUrls.rgUrl && (
+                    <a
+                      href={docUrls.rgUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                    >
+                      <ExternalLink className="size-3.5 text-muted-foreground" />
+                      RG
+                    </a>
+                  )}
+                  {docUrls.comprovanteUrl && (
+                    <a
+                      href={docUrls.comprovanteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                    >
+                      <ExternalLink className="size-3.5 text-muted-foreground" />
+                      Comprovante de Endereço
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <div className="flex gap-3">
+                  {client.fotoPath && <Skeleton className="h-9 w-36" />}
+                  {client.rgPath && <Skeleton className="h-9 w-20" />}
+                  {client.comprovantePath && <Skeleton className="h-9 w-48" />}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

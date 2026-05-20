@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { SupabaseAuthGuard } from './supabase-auth.guard';
 
+// Drop-in replacement: delegates to SupabaseAuthGuard.
+// All existing @UseGuards(JwtAuthGuard) controllers work without modification.
 @Injectable()
-export class JwtAuthGuard extends AuthGuard('jwt') {}
+export class JwtAuthGuard extends SupabaseAuthGuard {}

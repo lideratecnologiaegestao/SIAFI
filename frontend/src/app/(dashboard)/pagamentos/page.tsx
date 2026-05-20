@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate, METODO_PAGAMENTO } from '@/lib/utils'
 import api from '@/lib/api'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useAuth } from '@/contexts/auth.context'
 
 interface Payment {
   id: number; valorPago: number; dataPagamento: string; metodoPagamento: string; observacao: string
@@ -21,6 +22,8 @@ interface Payment {
 export default function PagamentosPage() {
   const [search, setSearch] = useState('')
   const qc = useQueryClient()
+  const { user } = useAuth()
+  const canEstornar = user?.role === 'admin' || user?.role === 'financeiro'
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['payments', { search }],
@@ -88,9 +91,11 @@ export default function PagamentosPage() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{formatDate(p.dataPagamento)}</td>
                       <td className="px-4 py-3 text-right">
-                        <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={() => handleEstorno(p.id)} disabled={estornoMut.isPending}>
-                          <Undo2 className="size-3" />Estornar
-                        </Button>
+                        {canEstornar && (
+                          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={() => handleEstorno(p.id)} disabled={estornoMut.isPending}>
+                            <Undo2 className="size-3" />Estornar
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   ))}

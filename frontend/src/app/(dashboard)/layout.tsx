@@ -1,22 +1,47 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Topbar } from '@/components/layout/topbar'
-import { useAuth } from '@/contexts/auth.context'
+import { useAuth, type UserRole } from '@/contexts/auth.context'
 import { Loader2 } from 'lucide-react'
 
+// Prefixes that require a minimum role set. First match wins.
+const ROUTE_ROLES: Array<{ prefix: string; roles: UserRole[] }> = [
+  { prefix: '/usuarios', roles: ['admin'] },
+  { prefix: '/configuracoes', roles: ['admin'] },
+  { prefix: '/auditoria', roles: ['admin'] },
+  { prefix: '/emprestimos', roles: ['admin', 'financeiro'] },
+  { prefix: '/relatorios', roles: ['admin', 'financeiro'] },
+  { prefix: '/renegociacoes', roles: ['admin', 'financeiro'] },
+  { prefix: '/pix', roles: ['admin', 'financeiro'] },
+  { prefix: '/conciliacao', roles: ['admin', 'financeiro'] },
+  { prefix: '/inadimplentes', roles: ['admin', 'financeiro'] },
+  { prefix: '/notificacoes', roles: ['admin', 'financeiro'] },
+]
+
+function isAllowed(pathname: string, role: UserRole): boolean {
+  const match = ROUTE_ROLES.find((r) => pathname.startsWith(r.prefix))
+  if (!match) return true
+  return (match.roles as string[]).includes(role)
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth()
+  const { isAuthenticated, isLoading, user } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace('/login')
+      return
     }
-  }, [isAuthenticated, isLoading, router])
+    if (!isLoading && user && pathname && !isAllowed(pathname, user.role)) {
+      router.replace('/dashboard')
+    }
+  }, [isAuthenticated, isLoading, user, pathname, router])
 
   if (isLoading) {
     return (

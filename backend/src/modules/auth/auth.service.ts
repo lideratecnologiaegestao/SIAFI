@@ -1,13 +1,14 @@
 import {
   Injectable,
   UnauthorizedException,
+  ConflictException,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { SupabaseService } from '../../supabase/supabase.service';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import * as crypto from 'crypto';
 import type { Response } from 'express';
 
 export interface AuthenticatedUser {
@@ -17,134 +18,218 @@ export interface AuthenticatedUser {
   role: string;
 }
 
+export interface CreateOperatorDto {
+  nome: string;
+  username: string;
+  password: string;
+  role: UserRole;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
-    private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly supabase: SupabaseService,
   ) {}
 
-  async validateUser(
-    username: string,
-    password: string,
-  ): Promise<AuthenticatedUser | null> {
+  // ─── Validate (used by LocalStrategy) ────────────────────────────────────────
+
+  async validateUser(username: string, password: string): Promise<AuthenticatedUser | null> {
     const user = await this.usersService.findByUsername(username);
-    if (!user || !user.active) {
-      return null;
-    }
-
+    if (!user || !user.active) return null;
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return null;
-    }
-
+    if (!isMatch) return null;
     const { password: _pw, ...result } = user;
     return result as AuthenticatedUser;
   }
 
+  // ─── Login ────────────────────────────────────────────────────────────────────
+
   async login(
-    user: AuthenticatedUser,
+    username: string,
+    password: string,
     res: Response,
-  ): Promise<{ accessToken: string; user: { id: number; nome: string; role: string } }> {
-    const payload = { sub: user.id, username: user.username, role: user.role };
+  ): Promise<{
+    accessToken: string;
+    user: { id: number; nome: string; role: string };
+    needsMfa?: boolean;
+  }> {
+    // 1. Validate locally (bcrypt) to ensure credentials are correct
+    const user = await this.validateUser(username, password);
+    if (!user) throw new UnauthorizedException('Credenciais inválidas');
 
-    const accessToken = this.jwtService.sign(payload, {
-      secret: process.env.JWT_SECRET || 'siafi_jwt_secret_change_in_production',
-      expiresIn: '15m',
+    const email = this.toSupabaseEmail(username);
+
+    // 2. Auto-sync user to Supabase Auth on first login
+    const dbUser = await this.prisma.user.findUnique({ where: { id: user.id } });
+    if (!dbUser?.supabaseId) {
+      await this.syncToSupabase(user, password, email);
+    }
+
+    // 3. Sign in with Supabase to get session tokens
+    const { data, error } = await this.supabase.admin.auth.signInWithPassword({
+      email,
+      password,
     });
 
-    const refreshToken = this.jwtService.sign(payload, {
-      secret:
-        process.env.JWT_REFRESH_SECRET ||
-        'siafi_jwt_refresh_secret_change_in_production',
-      expiresIn: '7d',
-    });
+    if (error || !data.session) {
+      throw new UnauthorizedException('Falha na autenticação Supabase');
+    }
 
-    const tokenHash = this.hashToken(refreshToken);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const { access_token, refresh_token } = data.session;
 
-    await this.prisma.refreshToken.create({
-      data: {
-        token: tokenHash,
-        userId: user.id,
-        expiresAt,
-      },
-    });
-
-    const maxAge = 7 * 24 * 60 * 60 * 1000;
-    res.cookie('refresh_token', refreshToken, {
+    // 4. Set Supabase refresh token as httpOnly cookie
+    res.cookie('refresh_token', refresh_token, {
       httpOnly: true,
       sameSite: 'lax',
-      maxAge,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       secure: process.env.NODE_ENV === 'production',
       path: '/',
     });
 
+    // 5. Determine if MFA challenge is still required
+    const aal = this.extractAal(access_token);
+    const hasMfaEnabled = data.session.user?.factors?.some(
+      (f: { status: string }) => f.status === 'verified',
+    );
+    const needsMfa =
+      ['admin', 'financeiro'].includes(user.role) && hasMfaEnabled && aal !== 'aal2';
+
     return {
-      accessToken,
-      user: {
-        id: user.id,
-        nome: user.nome,
-        role: user.role,
-      },
+      accessToken: access_token,
+      user: { id: user.id, nome: user.nome, role: user.role },
+      ...(needsMfa ? { needsMfa: true } : {}),
     };
   }
 
-  async refresh(refreshToken: string): Promise<{ accessToken: string }> {
-    let payload: { sub: number; username: string; role: string };
+  // ─── Refresh ──────────────────────────────────────────────────────────────────
 
-    try {
-      payload = this.jwtService.verify(refreshToken, {
-        secret:
-          process.env.JWT_REFRESH_SECRET ||
-          'siafi_jwt_refresh_secret_change_in_production',
-      });
-    } catch {
+  async refresh(refreshToken: string): Promise<{ accessToken: string }> {
+    const { data, error } = await this.supabase.admin.auth.refreshSession({
+      refresh_token: refreshToken,
+    });
+    if (error || !data.session) {
       throw new UnauthorizedException('Refresh token inválido ou expirado');
     }
+    return { accessToken: data.session.access_token };
+  }
 
-    const tokenHash = this.hashToken(refreshToken);
+  // ─── Logout ───────────────────────────────────────────────────────────────────
 
-    const storedToken = await this.prisma.refreshToken.findUnique({
-      where: { token: tokenHash },
+  async logout(supabaseId: string): Promise<void> {
+    try {
+      await this.supabase.admin.auth.admin.signOut(supabaseId, 'local');
+    } catch {
+      // Best-effort — client removes cookie regardless
+    }
+  }
+
+  // ─── Create Operator ──────────────────────────────────────────────────────────
+
+  async createOperator(dto: CreateOperatorDto): Promise<{
+    id: number;
+    username: string;
+    nome: string;
+    role: UserRole;
+  }> {
+    const email = this.toSupabaseEmail(dto.username);
+
+    // Check if username already exists in Prisma
+    const existing = await this.prisma.user.findUnique({ where: { username: dto.username } });
+    if (existing) throw new ConflictException('Username já está em uso');
+
+    // Create in Supabase Auth
+    const { data: authData, error } = await this.supabase.admin.auth.admin.createUser({
+      email,
+      password: dto.password,
+      email_confirm: true,
+      app_metadata: { role: dto.role },
+      user_metadata: { nome: dto.nome, username: dto.username },
     });
 
-    if (!storedToken || storedToken.userId !== payload.sub) {
-      throw new UnauthorizedException('Refresh token não encontrado');
+    if (error) {
+      throw new InternalServerErrorException(`Erro Supabase: ${error.message}`);
     }
 
-    if (storedToken.expiresAt < new Date()) {
-      await this.prisma.refreshToken.delete({ where: { id: storedToken.id } });
-      throw new UnauthorizedException('Refresh token expirado');
-    }
+    const supabaseId = authData.user.id;
 
-    const newAccessToken = this.jwtService.sign(
-      { sub: payload.sub, username: payload.username, role: payload.role },
-      {
-        secret: process.env.JWT_SECRET || 'siafi_jwt_secret_change_in_production',
-        expiresIn: '15m',
+    // Create in Prisma with supabaseId
+    const hashedPw = await bcrypt.hash(dto.password, 12);
+    const user = await this.prisma.user.create({
+      data: {
+        nome: dto.nome,
+        username: dto.username,
+        password: hashedPw,
+        role: dto.role,
+        supabaseId,
       },
-    );
+    });
 
-    return { accessToken: newAccessToken };
+    // Set prismaId in app_metadata for zero-latency guard lookups
+    await this.supabase.admin.auth.admin.updateUserById(supabaseId, {
+      app_metadata: { role: dto.role, prismaId: user.id },
+    });
+
+    return { id: user.id, username: user.username, nome: user.nome, role: user.role };
   }
 
-  async logout(userId: number, refreshToken: string): Promise<void> {
+  // ─── Sync Role ────────────────────────────────────────────────────────────────
+
+  async syncRole(supabaseId: string, role: UserRole): Promise<void> {
+    await this.supabase.admin.auth.admin.updateUserById(supabaseId, {
+      app_metadata: { role },
+    });
+  }
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+  private toSupabaseEmail(username: string): string {
+    return `${username}@siafi.local`;
+  }
+
+  private extractAal(token: string): string {
     try {
-      const tokenHash = this.hashToken(refreshToken);
-      await this.prisma.refreshToken.deleteMany({
-        where: {
-          token: tokenHash,
-          userId,
-        },
-      });
+      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+      return (payload.aal as string) || 'aal1';
     } catch {
-      throw new InternalServerErrorException('Erro ao encerrar sessão');
+      return 'aal1';
     }
   }
 
-  private hashToken(token: string): string {
-    return crypto.createHash('sha256').update(token).digest('hex');
+  private async syncToSupabase(
+    user: AuthenticatedUser,
+    rawPassword: string,
+    email: string,
+  ): Promise<void> {
+    // Check if Supabase account exists with this email
+    const { data: listData } = await this.supabase.admin.auth.admin.listUsers();
+    const users = (listData as { users?: { id: string; email?: string }[] } | null)?.users ?? [];
+    const existing = users.find((u) => u.email === email);
+
+    let supabaseId: string;
+
+    if (existing) {
+      supabaseId = existing.id;
+      await this.supabase.admin.auth.admin.updateUserById(supabaseId, {
+        password: rawPassword,
+        app_metadata: { role: user.role, prismaId: user.id },
+        user_metadata: { nome: user.nome, username: user.username },
+      });
+    } else {
+      const { data, error } = await this.supabase.admin.auth.admin.createUser({
+        email,
+        password: rawPassword,
+        email_confirm: true,
+        app_metadata: { role: user.role, prismaId: user.id },
+        user_metadata: { nome: user.nome, username: user.username },
+      });
+      if (error || !data.user) {
+        throw new InternalServerErrorException(`Sync Supabase falhou: ${error?.message}`);
+      }
+      supabaseId = data.user.id;
+    }
+
+    await this.prisma.user.update({ where: { id: user.id }, data: { supabaseId } });
   }
 }

@@ -6,13 +6,26 @@
  *
  * Safe to run multiple times (idempotent via upsert/skip-existing).
  * Run with the backend stopped to avoid Prisma connection conflicts.
+ *
+ * Usuários migrados recebem senha temporária: Mudar@2026
+ * (deve ser alterada no primeiro acesso)
  */
+
+import * as dotenv from 'dotenv'
+dotenv.config()
 
 import * as mysql from 'mysql2/promise'
 import { PrismaClient } from '@prisma/client'
 import * as bcrypt from 'bcrypt'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 const prisma = new PrismaClient()
+
+const supabaseAdmin: SupabaseClient = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { autoRefreshToken: false, persistSession: false } },
+)
 
 // Legacy DB connection (sistema_financeiro)
 const LEGACY_DB = {
@@ -23,6 +36,9 @@ const LEGACY_DB = {
   database: 'sistema_financeiro',
   dateStrings: true,
 }
+
+// Senha temporária para todos os usuários migrados
+const TEMP_PASSWORD = 'Mudar@2026'
 
 type Row = Record<string, unknown>
 
@@ -50,6 +66,7 @@ async function migrateUsers(conn: mysql.Connection): Promise<Map<number, number>
 
   for (const row of rows as Row[]) {
     const legacyId = Number(row['id'])
+    const username = String(row['username'])
 
     const roleMap: Record<string, string> = {
       admin: 'admin',
@@ -65,31 +82,81 @@ async function migrateUsers(conn: mysql.Connection): Promise<Map<number, number>
       password = await bcrypt.hash(password || 'mudar123', 10)
     }
 
+    // Email: usa o do legado ou gera um fictício baseado no username
+    const email = trimStr(row['email']) ?? `${username}@siafi.local`
+    const nome = String(row['nome'] ?? row['name'] ?? 'Usuário')
+    const active = Boolean(row['active'] ?? row['ativo'] ?? true)
+
     try {
-      const existing = await prisma.user.findUnique({ where: { username: String(row['username']) } })
+      // ── 1. Verifica se já existe no Prisma ────────────────────────────
+      const existing = await prisma.user.findUnique({ where: { username } })
+
+      let prismaUserId: number
+      let supabaseId: string | null = existing?.supabaseId ?? null
 
       if (existing) {
-        idMap.set(legacyId, existing.id)
-        console.log(`  skip user ${row['username']} (já existe id=${existing.id})`)
-        continue
+        prismaUserId = existing.id
+        idMap.set(legacyId, prismaUserId)
+        console.log(`  skip prisma user ${username} (id=${prismaUserId})`)
+      } else {
+        const user = await prisma.user.create({
+          data: {
+            nome,
+            username,
+            password,
+            role: role as 'admin' | 'financeiro' | 'caixa' | 'usuario' | 'cliente',
+            active,
+            createdAt: toDate(row['created_at']) ?? new Date(),
+            updatedAt: new Date(),
+          },
+        })
+        prismaUserId = user.id
+        idMap.set(legacyId, prismaUserId)
+        console.log(`  ✓ prisma user ${username} (${legacyId} → ${prismaUserId})`)
       }
 
-      const user = await prisma.user.create({
-        data: {
-          nome: String(row['nome'] ?? row['name'] ?? 'Usuário'),
-          username: String(row['username']),
-          password,
-          role: role as 'admin' | 'financeiro' | 'caixa' | 'usuario' | 'cliente',
-          active: Boolean(row['active'] ?? row['ativo'] ?? true),
-          createdAt: toDate(row['created_at']) ?? new Date(),
-          updatedAt: new Date(),
-        },
-      })
+      // ── 2. Cria no Supabase Auth (se ainda não tem supabaseId) ────────
+      if (!supabaseId) {
+        // Tenta criar — se o email já existe no Auth, busca pelo email
+        const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: TEMP_PASSWORD,
+          email_confirm: true,
+          app_metadata: { role },
+          user_metadata: { username, nome, role },
+        })
 
-      idMap.set(legacyId, user.id)
-      console.log(`  ✓ user ${user.username} (${legacyId} → ${user.id})`)
+        if (createErr) {
+          if (createErr.message.includes('already been registered') || createErr.message.includes('already exists')) {
+            // Busca o usuário existente por email
+            const { data: list } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })
+            const found = list?.users?.find((u) => u.email === email)
+            if (found) {
+              supabaseId = found.id
+              console.log(`    ↳ supabase auth: email ${email} já existe, supabaseId=${supabaseId}`)
+            } else {
+              console.warn(`    ↳ supabase auth: erro ao criar ${email}: ${createErr.message}`)
+            }
+          } else {
+            console.warn(`    ↳ supabase auth erro ${email}: ${createErr.message}`)
+          }
+        } else {
+          supabaseId = created.user.id
+          console.log(`    ↳ supabase auth criado ${email} → supabaseId=${supabaseId}`)
+        }
+
+        // ── 3. Salva supabaseId no Prisma ─────────────────────────────
+        if (supabaseId) {
+          await prisma.user.update({
+            where: { id: prismaUserId },
+            data: { supabaseId },
+          })
+        }
+      } else {
+        console.log(`    ↳ supabase auth: já vinculado supabaseId=${supabaseId}`)
+      }
     } catch (err) {
-      console.error(`  ✗ user ${row['username']}:`, (err as Error).message)
+      console.error(`  ✗ user ${username}:`, (err as Error).message)
     }
   }
 
@@ -131,6 +198,7 @@ async function migrateClients(conn: mysql.Connection): Promise<Map<number, numbe
           cidade: trimStr(row['cidade']),
           estado: trimStr(row['estado']),
           cep: trimStr(row['cep']),
+          // Caminhos locais migrados; arquivos físicos não são copiados automaticamente
           fotoPath: trimStr(row['foto_path']),
           rgPath: trimStr(row['rg_path']),
           comprovantePath: trimStr(row['comprovante_path']),
@@ -176,7 +244,7 @@ async function migrateLoans(
     const newClientId = clientIdMap.get(Number(row['client_id']))
 
     if (!newClientId) {
-      console.warn(`  skip loan ${legacyId}: client_id ${row['client_id']} not mapped`)
+      console.warn(`  skip loan ${legacyId}: client_id ${row['client_id']} não mapeado`)
       continue
     }
 
@@ -231,7 +299,7 @@ async function migrateInstallments(
     const newLoanId = loanIdMap.get(Number(row['loan_id']))
 
     if (!newLoanId) {
-      console.warn(`  skip installment ${legacyId}: loan_id ${row['loan_id']} not mapped`)
+      console.warn(`  skip installment ${legacyId}: loan_id ${row['loan_id']} não mapeado`)
       continue
     }
 
@@ -285,7 +353,7 @@ async function migratePayments(
     const newInstId = installmentIdMap.get(Number(row['installment_id']))
 
     if (!newInstId) {
-      console.warn(`  skip payment ${legacyId}: installment_id not mapped`)
+      console.warn(`  skip payment ${legacyId}: installment_id não mapeado`)
       continue
     }
 
@@ -389,7 +457,13 @@ async function migrateRenegociacoes(
 
 async function main() {
   console.log('=== SIAFI Migration: sistema_financeiro → siafi_v2 ===')
-  console.log(`Started at: ${new Date().toISOString()}`)
+  console.log(`Iniciado em: ${new Date().toISOString()}`)
+  console.log(`Senha temporária dos usuários migrados: ${TEMP_PASSWORD}`)
+
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('✗ SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não encontrados no .env')
+    process.exit(1)
+  }
 
   let conn: mysql.Connection | null = null
 
@@ -400,7 +474,7 @@ async function main() {
     await prisma.$connect()
     console.log('✓ Conectado ao banco novo (siafi_v2 via Prisma)')
 
-    // Migration order matters (foreign keys)
+    // Ordem importa (foreign keys)
     const userIdMap = await migrateUsers(conn)
     const clientIdMap = await migrateClients(conn)
     const loanIdMap = await migrateLoans(conn, clientIdMap)
@@ -410,9 +484,8 @@ async function main() {
     await migrateRenegociacoes(conn, loanIdMap)
 
     console.log('\n=== Migração concluída com sucesso! ===')
-    console.log(`Finished at: ${new Date().toISOString()}`)
+    console.log(`Finalizado em: ${new Date().toISOString()}`)
 
-    // Print summary
     const [uCount, cCount, lCount, iCount, pCount, tCount] = await Promise.all([
       prisma.user.count(),
       prisma.client.count(),
@@ -429,6 +502,9 @@ async function main() {
     console.log(`  Parcelas:     ${iCount}`)
     console.log(`  Pagamentos:   ${pCount}`)
     console.log(`  Transações:   ${tCount}`)
+
+    console.log(`\n⚠️  Lembrete: todos os usuários migrados têm senha temporária "${TEMP_PASSWORD}"`)
+    console.log('   Peça para cada operador trocar a senha no primeiro acesso.')
   } catch (err) {
     console.error('\n✗ Erro fatal na migração:', err)
     process.exit(1)

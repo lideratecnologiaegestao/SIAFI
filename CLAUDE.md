@@ -22,11 +22,12 @@
 ## Stack Tecnológico (SIAFI 2.0)
 
 ```
-Backend:   NestJS 10 · TypeScript 5 · Prisma 5 · MySQL (banco: siafi_v2)
+Backend:   NestJS 10 · TypeScript 5 · Prisma 5 · PostgreSQL via Supabase (sa-east-1)
 Frontend:  Next.js 16 (App Router) · TypeScript 5 · Tailwind CSS 4 · shadcn/ui
-Auth:      JWT access token (15min, em memória) + refresh token (7d, httpOnly cookie)
+Auth:      JWT manual → migrando para Supabase Auth (GoTrue)  [EM MIGRAÇÃO]
 Portas:    Backend :4010  Frontend :4011
 Deploy:    NSSM (Windows Service) · Nginx reverse proxy · SSL Let's Encrypt
+Supabase:  lvpseuaybpnmrneuyndi · https://lvpseuaybpnmrneuyndi.supabase.co
 ```
 
 ---

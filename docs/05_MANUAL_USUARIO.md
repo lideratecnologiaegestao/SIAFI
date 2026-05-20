@@ -42,6 +42,28 @@
 
 > Caso esqueça a senha, entre em contato com o Administrador do sistema.
 
+### Autenticação em Dois Fatores (MFA)
+
+Se o seu perfil é **Administrador** ou **Financeiro** e você configurou a autenticação em dois fatores:
+1. Após inserir usuário e senha, o sistema solicitará um **código de verificação**
+2. Abra o aplicativo autenticador no seu celular (Google Authenticator, Authy, etc.)
+3. Digite o código de 6 dígitos exibido no app
+4. Clique em **Verificar**
+
+> O código muda a cada 30 segundos. Digite antes de expirar.
+
+### Configurar autenticação em dois fatores
+
+Se você deseja ativar o MFA no seu perfil:
+1. Entre no sistema normalmente
+2. Acesse **Configurações → Segurança → Ativar Autenticação em Dois Fatores**
+3. Escaneie o QR Code com seu aplicativo autenticador
+4. Confirme com o primeiro código gerado
+
+### Login com Google
+
+Usuários que possuem conta Google vinculada podem clicar em **Entrar com Google** na tela de login.
+
 ### Sair do sistema
 
 Clique no seu nome no canto superior direito → **Sair**.
@@ -50,7 +72,7 @@ Clique no seu nome no canto superior direito → **Sair**.
 
 ## 2. Tela Principal (Dashboard)
 
-A tela inicial apresenta um resumo de toda a operação financeira.
+A tela inicial apresenta um resumo de toda a operação financeira, **atualizado automaticamente em tempo real**.
 
 ### Cards de Resumo (clicáveis)
 
@@ -61,6 +83,12 @@ A tela inicial apresenta um resumo de toda a operação financeira.
 | **Clientes Atrasados** | Clientes com parcela vencida | Abrir carteira inadimplente |
 | **Clientes Quitados** | Clientes com empréstimo pago | Informativo |
 
+> Os cards **Empréstimos Ativos** são visíveis apenas para perfis Administrador e Financeiro.
+
+### Atualização em Tempo Real
+
+O dashboard atualiza os dados automaticamente quando pagamentos são registrados ou parcelas mudam de status. Um indicador verde pulsante no canto superior confirma que a conexão em tempo real está ativa.
+
 ### Lista de Clientes Atrasados
 
 Exibe o nome de cada cliente em atraso e a quantidade de parcelas pendentes. Clique no nome para ver o perfil completo do cliente.
@@ -68,8 +96,6 @@ Exibe o nome de cada cliente em atraso e a quantidade de parcelas pendentes. Cli
 ### Lista de Clientes Quitados
 
 Exibe clientes que já quitaram seus empréstimos. Clique no nome para ver o histórico.
-
-> **Dica:** Clique no botão **Atualizar** para recarregar os dados em tempo real.
 
 ---
 
@@ -86,25 +112,29 @@ Menu: **Operacional → Clientes**
 ### Cadastrar novo cliente
 
 1. Clique em **Novo Cliente**
-2. Preencha os **Dados Pessoais**: Nome, CPF, RG, Data de Nascimento
+2. Preencha os **Dados Pessoais**: Nome, CPF/CNPJ, RG, Data de Nascimento
 3. Preencha os **Dados de Contato**: WhatsApp, Telefone, E-mail
 4. Preencha o **Endereço**: Rua, Bairro, Cidade, Estado, CEP
-5. Faça upload de documentos (opcional): Foto, RG, Comprovante de Renda
+5. Faça upload de documentos (opcional): Foto, RG, Comprovante de Endereço
 6. Clique em **Salvar Cliente**
 
-> CPF é único no sistema — não é possível cadastrar dois clientes com o mesmo CPF.
+> **CPF ou CNPJ:** O campo aceita tanto CPF (pessoa física, 11 dígitos) quanto CNPJ (empresa, 14 dígitos). A formatação é aplicada automaticamente conforme você digita. O CPF é único no sistema — não é possível cadastrar dois clientes com o mesmo CPF/CNPJ.
+
+> **Documentos:** Os arquivos são armazenados de forma segura na nuvem. Formatos aceitos: JPG, PNG, WEBP e PDF. Tamanho máximo: 10 MB por arquivo.
 
 ### Ver detalhes do cliente
 
 Clique no botão **Ver** ou no nome do cliente para abrir o perfil completo, que exibe:
 - Dados pessoais e de contato
 - Endereço
+- **Documentos**: visualização dos arquivos enviados (foto, RG, comprovante)
 - **Contratos (Empréstimos)**: listados sequencialmente (Contrato 1, Contrato 2...) com status
 - Botão para criar novo empréstimo para esse cliente
 
 ### Editar cliente
 
 No perfil do cliente, clique em **Editar** e altere os campos necessários.
+Campos opcionais podem ser deixados em branco. Documentos existentes são mantidos se nenhum novo arquivo for selecionado.
 
 ### Inativar cliente
 
@@ -194,7 +224,7 @@ Menu: **Operacional → Pagamentos**
 
 ### Ver histórico de pagamentos
 
-Lista todos os pagamentos recebidos, com filtro por data e método.
+Lista todos os pagamentos recebidos, com filtro por busca de cliente.
 
 ### Registrar novo pagamento
 
@@ -212,7 +242,7 @@ Lista todos os pagamentos recebidos, com filtro por data e método.
 
 ### Estornar pagamento
 
-Na lista de pagamentos, clique em **Estornar** (ícone de retorno). O sistema:
+Na lista de pagamentos, clique em **Estornar** (apenas Administrador e Financeiro). O sistema:
 - Remove o pagamento
 - Recalcula o saldo da parcela
 - Reverte o status da parcela para pendente ou atrasado
@@ -397,6 +427,8 @@ Exibe todos os operadores cadastrados com nome, usuário, perfil e status.
    - **Cliente**: portal do cliente
 6. Clique em **Criar Usuário**
 
+> O usuário é criado automaticamente no sistema de autenticação. Não é necessário nenhuma configuração adicional.
+
 ### Editar usuário
 
 Na lista, clique no ícone de edição. É possível alterar:
@@ -444,6 +476,8 @@ Use para rastrear alterações e garantir conformidade.
 | **Caixa** | ✅ | Ler | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Usuário** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
+> **Estornar pagamento:** disponível apenas para Administrador e Financeiro.
+
 ---
 
 ## 19. Dúvidas Frequentes
@@ -468,6 +502,12 @@ R: Acesse **Usuários → [operador] → Editar**, preencha o campo **Nova Senha
 
 **P: Como registrar uma despesa no caixa?**
 R: Acesse **Caixa**, preencha o formulário de lançamento com Tipo = Saída e o valor da despesa.
+
+**P: O sistema pede um código mesmo depois de digitar usuário e senha.**
+R: Seu perfil tem autenticação em dois fatores (MFA) ativada. Abra o aplicativo autenticador no celular e insira o código de 6 dígitos exibido.
+
+**P: Posso cadastrar um cliente que é empresa (CNPJ)?**
+R: Sim. O campo CPF/CNPJ aceita ambos. Digite os 14 dígitos do CNPJ — a formatação é aplicada automaticamente.
 
 ---
 

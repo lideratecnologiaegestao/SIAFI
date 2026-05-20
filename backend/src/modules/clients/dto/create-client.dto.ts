@@ -11,6 +11,11 @@ import {
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 
+function stripNonDigits(value: unknown): unknown {
+  if (typeof value === 'string') return value.replace(/\D/g, '');
+  return value;
+}
+
 export class CreateClientDto {
   @IsNotEmpty()
   @IsString()
@@ -18,8 +23,9 @@ export class CreateClientDto {
   nome: string;
 
   @IsOptional()
+  @Transform(({ value }) => stripNonDigits(value))
   @IsString()
-  @Matches(/^\d{11}$/, { message: 'CPF deve conter exatamente 11 dígitos numéricos' })
+  @Matches(/^\d{11}$|^\d{14}$/, { message: 'CPF deve ter 11 dígitos ou CNPJ 14 dígitos' })
   cpf?: string;
 
   @IsOptional()

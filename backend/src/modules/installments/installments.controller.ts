@@ -16,7 +16,7 @@ export class InstallmentsController {
   constructor(private readonly installmentsService: InstallmentsService) {}
 
   @Get('overdue')
-  @Roles('admin', 'financeiro')
+  @Roles('admin', 'financeiro', 'caixa')
   findOverdue() {
     return this.installmentsService.findOverdue();
   }

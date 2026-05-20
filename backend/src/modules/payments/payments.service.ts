@@ -88,6 +88,29 @@ export class PaymentsService {
     return payment;
   }
 
+  async findAll(search?: string): Promise<unknown[]> {
+    return this.prisma.payment.findMany({
+      where: search
+        ? {
+            installment: {
+              loan: {
+                client: { nome: { contains: search, mode: 'insensitive' } },
+              },
+            },
+          }
+        : undefined,
+      include: {
+        installment: {
+          include: {
+            loan: { include: { client: { select: { nome: true } } } },
+          },
+        },
+      },
+      orderBy: { dataPagamento: 'desc' },
+      take: 100,
+    });
+  }
+
   async findByInstallment(installmentId: number): Promise<unknown[]> {
     return this.prisma.payment.findMany({
       where: { installmentId },

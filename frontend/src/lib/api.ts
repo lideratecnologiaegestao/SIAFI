@@ -66,12 +66,26 @@ api.interceptors.response.use(
     _isRefreshing = true
 
     try {
+      // Primary: NestJS refresh via httpOnly cookie (username/password users)
       const { data } = await api.post<{ accessToken: string }>('/auth/refresh')
       tokenStore.set(data.accessToken)
       processQueue(null, data.accessToken)
       originalRequest.headers.Authorization = `Bearer ${data.accessToken}`
       return api(originalRequest)
     } catch (refreshError) {
+      // Fallback: Supabase session from cookies (Google OAuth users)
+      try {
+        const { getSupabaseBrowserClient } = await import('./supabase/client')
+        const supabase = getSupabaseBrowserClient()
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.access_token) {
+          tokenStore.set(session.access_token)
+          processQueue(null, session.access_token)
+          originalRequest.headers.Authorization = `Bearer ${session.access_token}`
+          return api(originalRequest)
+        }
+      } catch {}
+
       processQueue(refreshError, null)
       tokenStore.clear()
       return Promise.reject(refreshError)

@@ -35,13 +35,14 @@ Antes do SIAFI, a operação dependia de:
 ## A Solução
 
 ```
-✅  Dashboard com visão em tempo real da carteira
-✅  Cadastro completo de clientes com documentos
+✅  Dashboard com visão em tempo real da carteira (atualização automática)
+✅  Cadastro completo de clientes com documentos na nuvem
 ✅  Empréstimos com geração automática de parcelas
 ✅  Controle de inadimplência com lista de clientes em atraso
 ✅  Registro de pagamentos com auditoria completa
 ✅  Relatórios gerenciais com indicadores estratégicos
 ✅  Integração PIX (QR Code via Mercado Pago)
+✅  Autenticação segura com MFA (dois fatores)
 ✅  Segurança com perfis de acesso por função
 ```
 
@@ -71,7 +72,7 @@ Antes do SIAFI, a operação dependia de:
 
 &nbsp;
 
-## Dashboard — Visão Geral da Operação
+## Dashboard — Visão em Tempo Real
 
 ```
 ┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
@@ -83,7 +84,7 @@ Antes do SIAFI, a operação dependia de:
 └─────────────────┴─────────────────┴─────────────────┴─────────────────┘
 
 ┌────────────────────────────┐  ┌────────────────────────────┐
-│  ⚠ Clientes Atrasados      │  │  ✓ Clientes Quitados       │
+│  ⚠ Clientes Atrasados   🟢 │  │  ✓ Clientes Quitados       │
 │                            │  │                            │
 │  João Silva    [3 parcelas]│  │  Maria Souza    [Quitado]  │
 │  Ana Costa     [1 parcela] │  │  Pedro Lima     [Quitado]  │
@@ -91,6 +92,7 @@ Antes do SIAFI, a operação dependia de:
 │                            │  │                            │
 │  [Ver todos →]             │  │                            │
 └────────────────────────────┘  └────────────────────────────┘
+                  🟢 = Realtime ativo
 ```
 
 ---
@@ -101,9 +103,9 @@ Antes do SIAFI, a operação dependia de:
 ┌─────────────────────────────────────────────────────────────┐
 │  Clientes                                  [+ Novo Cliente] │
 ├─────────────────────────────────────────────────────────────┤
-│  🔍 Buscar por nome, CPF ou WhatsApp...    [Status ▾]       │
+│  🔍 Buscar por nome, CPF/CNPJ ou WhatsApp... [Status ▾]     │
 ├──────────────────┬──────────┬──────────┬────────┬───────────┤
-│  Nome            │  CPF     │ WhatsApp │ Status │   Ações   │
+│  Nome            │  CPF/CNPJ│ WhatsApp │ Status │   Ações   │
 ├──────────────────┼──────────┼──────────┼────────┼───────────┤
 │  João da Silva   │ 123...   │ 61 9...  │ Ativo  │  👁  ✏    │
 │  Maria Souza     │ 456...   │ 61 8...  │ Ativo  │  👁  ✏    │
@@ -112,7 +114,8 @@ Antes do SIAFI, a operação dependia de:
 ```
 
 **Perfil do Cliente inclui:**
-- Dados pessoais · Contato · Endereço · Documentos
+- Dados pessoais · Contato · Endereço
+- Documentos (Foto · RG · Comprovante — armazenados na nuvem)
 - Histórico de **todos os contratos** numerados sequencialmente
 - Acesso direto para novo empréstimo
 
@@ -189,7 +192,7 @@ Antes do SIAFI, a operação dependia de:
 
 ```
                     ┌─────────────────────────────────┐
-                    │   https://financeiro.lidera.app.br  │
+                    │  https://financeiro.lidera.app.br│
                     └──────────────┬──────────────────┘
                                    │
                             ┌──────▼──────┐
@@ -197,17 +200,21 @@ Antes do SIAFI, a operação dependia de:
                             │  (SSL/TLS)  │
                             └──────┬──────┘
                     ┌──────────────┼──────────────┐
-                    ▼              ▼              ▼
+                    ▼                             ▼
             ┌──────────────┐             ┌──────────────┐
             │  Next.js 16  │             │  NestJS 10   │
-            │  :4011       │────JWT─────►│  :4010       │
+            │  :4011       │───JWT──────►│  :4010       │
             │  (Frontend)  │            │  (Backend)   │
             └──────────────┘             └──────┬───────┘
                                                 │ Prisma 5
-                                         ┌──────▼───────┐
-                                         │   MySQL 8    │
-                                         │  (siafi_v2)  │
-                                         └──────────────┘
+                                         ┌──────▼────────────────────────┐
+                                         │   Supabase (sa-east-1)        │
+                                         │                               │
+                                         │  PostgreSQL   ← dados         │
+                                         │  Auth/GoTrue  ← sessões + MFA │
+                                         │  Storage      ← documentos    │
+                                         │  Realtime     ← eventos live  │
+                                         └───────────────────────────────┘
 ```
 
 ### Stack Tecnológico
@@ -215,9 +222,11 @@ Antes do SIAFI, a operação dependia de:
 | Camada | Tecnologia | Por quê |
 |--------|-----------|---------|
 | **Backend** | NestJS 10 + TypeScript | Estrutura modular, tipagem forte, testável |
-| **Frontend** | Next.js 16 + App Router | Performance, SEO, rotas protegidas no servidor |
-| **Banco** | MySQL 8 + Prisma 5 | Confiabilidade + migrations versionadas |
-| **Auth** | JWT + Refresh Token HttpOnly | Seguro contra XSS e CSRF |
+| **Frontend** | Next.js 16 + App Router | Performance, rotas protegidas, SSR |
+| **Banco** | PostgreSQL + Prisma 5 | Confiabilidade + migrations versionadas |
+| **Auth** | Supabase GoTrue (JWT HS256) | MFA TOTP, OAuth Google, sessões gerenciadas |
+| **Storage** | Supabase Storage | Documentos privados na nuvem, URLs assinadas |
+| **Realtime** | Supabase Realtime | Dashboard atualizado automaticamente via WebSocket |
 | **Deploy** | NSSM + Windows Server | Ambiente de produção estável |
 | **UI** | Tailwind CSS 4 + shadcn/ui | Interface moderna e responsiva |
 
@@ -230,14 +239,15 @@ Antes do SIAFI, a operação dependia de:
 &nbsp;
 
 ```
-🔐  Autenticação JWT com expiração curta (15 minutos)
-🔄  Refresh Token automático e silencioso (7 dias)
-🍪  Refresh Token em cookie httpOnly (protegido de XSS)
+🔐  Autenticação via Supabase GoTrue JWT (15 minutos de expiração)
+🔑  MFA TOTP obrigatório para perfis Administrador e Financeiro
+🔄  Refresh Token automático e silencioso (7 dias, httpOnly cookie)
 👤  5 perfis de acesso com permissões granulares
+🛡️  Row Level Security (RLS) em todas as 16 tabelas do banco
 📋  Auditoria completa de todas as ações do sistema
-🔑  Bcrypt para hash de senhas (12 rounds)
 🔒  HTTPS com SSL Let's Encrypt em produção
-🛡️  Guards de autenticação + autorização em todos os endpoints
+🗄️  Documentos armazenados em bucket privado (Supabase Storage)
+🔗  URLs de documentos assinadas (expiram em 1 hora)
 ```
 
 ---
@@ -250,6 +260,7 @@ Antes do SIAFI, a operação dependia de:
 
 | Integração | Finalidade | Status |
 |-----------|-----------|--------|
+| **Supabase** | PostgreSQL · Auth · Storage · Realtime | ✅ Ativo |
 | **Mercado Pago** | Geração de QR Code PIX · Webhook de pagamento | Configurável |
 | **Evolution API** | Envio de cobranças e lembretes via WhatsApp | Configurável |
 | **SMTP** | Notificações por e-mail | Configurável |
@@ -309,7 +320,7 @@ Antes do SIAFI, a operação dependia de:
 | Prioridade | Funcionalidade | Descrição |
 |-----------|---------------|-----------|
 | 🔴 Alta | **Multa e Mora por Atraso** | Calcular e exibir valor reajustado para parcelas vencidas |
-| 🔴 Alta | **Portal do Cliente** | App web para clientes consultarem seus contratos e parcelas |
+| 🟡 Média | **Portal do Cliente** | App web para clientes consultarem contratos e parcelas |
 | 🟡 Média | **Contratos em PDF** | Geração automática de contrato de empréstimo formatado |
 | 🟡 Média | **Gráficos no Dashboard** | Evolução de carteira, inadimplência e recebimentos |
 | 🟢 Baixa | **Exportação Excel/PDF** | Exportar relatórios e listas para planilha ou PDF |
@@ -331,7 +342,8 @@ Sem histórico de ações         Auditoria completa de cada ação
 Inadimplência descoberta tarde Lista de atrasados em tempo real
 Sem integração PIX             QR Code gerado em 1 clique
 Relatórios manuais             Relatórios automáticos em segundos
-Senha compartilhada            Perfis individuais com rastreio
+Senha compartilhada            MFA + perfis individuais com rastreio
+Documentos em papel/local      Documentos na nuvem com acesso seguro
 ```
 
 ---
@@ -345,7 +357,7 @@ Senha compartilhada            Perfis individuais com rastreio
   Lidera · lideraabrange@gmail.com
   https://financeiro.lidera.app.br
 
-  Desenvolvido com  NestJS · Next.js · Prisma · MySQL · Tailwind
+  Desenvolvido com  NestJS · Next.js · Prisma · Supabase · Tailwind
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```

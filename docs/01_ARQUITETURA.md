@@ -21,8 +21,7 @@ Cliente (browser/mobile)
     │
     ▼
 Next.js :4011
-    │  Server Components → fetch() direto para NestJS
-    │  Client Components → axios com JWT no header
+    │  Client Components → axios com Supabase JWT no header
     │
     ▼
 Nginx (reverse proxy)
@@ -32,38 +31,88 @@ Nginx (reverse proxy)
     ▼
 NestJS :4010
     │
-    ├── Guards: JwtAuthGuard → RolesGuard
-    ├── Pipe: ValidationPipe (class-validator)
+    ├── Guards: JwtAuthGuard (valida JWT Supabase) → RolesGuard
+    ├── Pipe: ValidationPipe (class-validator, whitelist, transform)
     ├── Interceptor: AuditInterceptor (log de ações)
     │
     ▼
-Service → Repository → Prisma → MySQL
+Service → Prisma → PostgreSQL (Supabase Cloud sa-east-1)
+                  + Supabase Auth (GoTrue) — sessões e MFA
+                  + Supabase Storage — documentos de clientes
+                  + Supabase Realtime — atualizações ao vivo
 ```
 
 ---
 
-## Auth Flow (JWT)
+## Auth Flow (Supabase GoTrue + JWT)
 
 ```
-1. POST /auth/login
-   → valida credenciais → bcrypt.compare()
-   → retorna { accessToken (15min), refreshToken (7d) }
+1. POST /api/auth/login
+   → valida credenciais localmente (bcrypt)
+   → auto-sync usuário para Supabase Auth (primeira vez)
+   → signInWithPassword no Supabase Auth
+   → retorna { accessToken (JWT Supabase), user }
+   → seta refreshToken Supabase em httpOnly cookie (7d)
 
 2. Frontend armazena:
-   → accessToken: memória (variável/estado)
-   → refreshToken: httpOnly cookie
+   → accessToken: memória (AuthContext)
+   → refreshToken: httpOnly cookie (automático)
 
 3. A cada request:
    → Authorization: Bearer <accessToken>
+   → JwtAuthGuard valida assinatura JWT com SUPABASE_JWT_SECRET
+   → Extrai { sub (supabaseId), app_metadata: { role, prismaId } }
 
 4. accessToken expirado:
    → Frontend detecta 401
-   → POST /auth/refresh com refreshToken (cookie)
-   → Recebe novo accessToken
+   → POST /api/auth/refresh com refreshToken (cookie)
+   → Supabase emite novo access_token via refreshSession()
+   → Frontend atualiza token em memória + re-tenta request
 
-5. Logout:
-   → DELETE /auth/logout
-   → Invalida refreshToken no banco (tabela refresh_tokens)
+5. MFA (admin/financeiro com TOTP ativo):
+   → Login retorna { needsMfa: true } se AAL < aal2
+   → Frontend redireciona para /mfa-challenge
+   → POST /api/auth/mfa/challenge → verifica TOTP → eleva AAL para aal2
+
+6. Logout:
+   → POST /api/auth/logout
+   → Supabase Auth invalida sessão (signOut)
+   → Cookie removido
+```
+
+---
+
+## Supabase Storage
+
+```
+Bucket: client-documents (privado, 10 MB, image/jpeg|png|webp + application/pdf)
+    │
+    ├── {clientId}/foto_*.*        Foto do cliente
+    ├── {clientId}/rg_*.*          Documento RG (frente)
+    └── {clientId}/comprovante_*.* Comprovante de endereço
+
+Upload: via SupabaseService.uploadFile() (backend → service_role)
+Acesso: GET /api/clients/:id/document-urls → URLs assinadas (1 hora)
+
+RLS em storage.objects:
+  - service_role: ALL (upload pelo backend)
+  - authenticated: SELECT + INSERT + UPDATE + DELETE
+```
+
+---
+
+## Supabase Realtime
+
+```
+Publication: supabase_realtime
+  - installments (INSERT, UPDATE)
+  - payments (INSERT, DELETE)
+  - transactions (INSERT)
+
+Frontend: useRealtimeDashboard() hook
+  → Subscription Supabase Realtime
+  → On change: qc.invalidateQueries(['dashboard'])
+  → Indicador visual: ponto verde pulsante no dashboard
 ```
 
 ---
@@ -109,10 +158,12 @@ Nunca expor stack trace em produção (`NODE_ENV=production`).
 
 ## Banco de Dados
 
-- MySQL (mesmo servidor do legado)
-- Banco separado: `sistema_financeiro_v2` durante desenvolvimento
-- Switch para banco de produção na Etapa 7 (migração de dados)
+- **PostgreSQL** via Supabase Cloud (região sa-east-1)
+- Projeto: `lvpseuaybpnmrneuyndi`
+- Conexão: Transaction Pooler :6543 (pgBouncer) para queries normais
+- Migrations: Session Pooler :5432 (DIRECT_URL) para `prisma migrate deploy`
 - Prisma Migrate para versionamento de schema
+- RLS habilitado em todas as 16 tabelas (acesso controlado por role)
 - Transações obrigatórias para operações multi-tabela
 
 ---
@@ -121,12 +172,14 @@ Nunca expor stack trace em produção (`NODE_ENV=production`).
 
 | Camada | Implementação |
 |--------|--------------|
-| Auth | JWT + httpOnly cookie para refresh |
-| Autorização | RolesGuard + @Roles() decorator |
-| Validação | class-validator em todos os DTOs |
+| Auth | Supabase GoTrue JWT (HS256, 15min) + refresh httpOnly cookie |
+| MFA | TOTP obrigatório para admin/financeiro (via Supabase MFA) |
+| Autorização | RolesGuard + @Roles() + app_metadata no JWT |
+| RLS | Row Level Security em 16 tabelas no PostgreSQL |
+| Validação | class-validator (whitelist + forbidNonWhitelisted) em todos os DTOs |
 | Rate limiting | @nestjs/throttler (login: 5/min, API: 100/min) |
 | CORS | Somente origin do frontend |
 | Headers | helmet.js |
-| Uploads | Validação de MIME real (magic bytes) + extensão |
-| SQL Injection | Prisma ORM (impossível com queries parametrizadas) |
-| XSS | Sanitização no frontend (React escapa por padrão) |
+| Uploads | Validação MIME + extensão; armazenados no Supabase Storage (privado) |
+| SQL Injection | Prisma ORM (queries parametrizadas) |
+| XSS | React escapa por padrão; tokens em memória (não localStorage) |

@@ -9,18 +9,21 @@ backend/src/
 ├── prisma/
 │   ├── prisma.module.ts       @Global() — disponível em todos os módulos
 │   └── prisma.service.ts      Instância do PrismaClient
+├── supabase/
+│   ├── supabase.module.ts     @Global() — SupabaseService disponível em todos os módulos
+│   └── supabase.service.ts    createClient() com service_role key (Auth Admin + Storage)
 ├── common/
 │   ├── decorators/
-│   │   ├── current-user.decorator.ts   @CurrentUser() extrai user do JWT
+│   │   ├── current-user.decorator.ts   @CurrentUser() extrai user do JWT Supabase
 │   │   └── roles.decorator.ts          @Roles('admin', 'financeiro')
 │   ├── guards/
-│   │   └── roles.guard.ts              Verifica role do JWT contra @Roles()
+│   │   └── roles.guard.ts              Verifica app_metadata.role do JWT contra @Roles()
 │   └── dto/
 │       └── paginated-response.dto.ts   { data, total, page, lastPage }
 └── modules/
-    ├── auth/           Login, JWT, refresh token, logout
-    ├── users/          CRUD operadores com bcrypt
-    ├── clients/        CRUD clientes + upload (multer) + stats ampliados
+    ├── auth/           Login Supabase, refresh, logout, MFA, createOperator
+    ├── users/          CRUD operadores com bcrypt + sync supabaseId
+    ├── clients/        CRUD clientes + upload Supabase Storage + stats
     ├── loans/          Empréstimos + parcelas automáticas + valorParcela direto
     ├── installments/   Parcelas + overdue
     ├── payments/       Pagamentos + estorno + transaction automática
@@ -40,25 +43,41 @@ backend/src/
 
 ## Autenticação
 
-### Fluxo JWT
+### Fluxo Supabase GoTrue
 
 ```
 POST /api/auth/login
-  → valida username + password (bcrypt)
-  → retorna accessToken (15min, no body)
-  → seta refreshToken (7d, httpOnly cookie SHA-256 no DB)
+  → valida username + password (bcrypt) localmente
+  → auto-sync usuário para Supabase Auth se supabaseId == null
+  → signInWithPassword no Supabase (email = username@siafi.local)
+  → retorna { accessToken (JWT Supabase), user: { id, nome, role } }
+  → seta refreshToken Supabase em httpOnly cookie (7d)
 
 GET /api/auth/me
   → Bearer {accessToken} no header Authorization
+  → JwtAuthGuard valida com SUPABASE_JWT_SECRET
   → retorna { id, nome, username, role }
 
 POST /api/auth/refresh
-  → lê cookie refreshToken
-  → valida hash no DB → emite novo accessToken
+  → lê cookie refresh_token
+  → Supabase refreshSession() → novo access_token
 
 POST /api/auth/logout
-  → remove refreshToken do DB + limpa cookie
+  → Supabase Auth admin.signOut(supabaseId, 'local')
+  → limpa cookie
+
+POST /api/auth/mfa/challenge
+  → { factorId, code } → Supabase MFA verify
+  → eleva AAL para aal2 → retorna novo accessToken
 ```
+
+### JwtAuthGuard
+
+O `JwtAuthGuard` valida o JWT do Supabase (algoritmo HS256, secret = `SUPABASE_JWT_SECRET`).
+Extrai do payload:
+- `sub` → supabaseId
+- `app_metadata.role` → role do operador
+- `app_metadata.prismaId` → id na tabela users
 
 ### Guards
 
@@ -68,12 +87,30 @@ POST /api/auth/logout
 @Controller('resource')
 export class ResourceController {
   @Get()
-  @Roles('admin', 'financeiro')  // RolesGuard verifica user.role
+  @Roles('admin', 'financeiro')
   findAll() { ... }
 
   @Get(':id')
   @Roles('admin', 'financeiro', 'caixa')
   findOne(@Param('id', ParseIntPipe) id: number) { ... }
+}
+```
+
+---
+
+## SupabaseService
+
+```typescript
+// Disponível via injeção em qualquer módulo (@Global)
+class SupabaseService {
+  admin: SupabaseClient  // criado com service_role key
+
+  // Upload de arquivo para bucket 'client-documents'
+  async uploadFile(bucket: string, path: string, buffer: Buffer, mimetype: string): Promise<string>
+  // path retornado: '{clientId}/tipo_timestamp.ext'
+
+  // URL assinada para download (1 hora)
+  async createSignedUrl(bucket: string, path: string, expiresIn = 3600): Promise<string>
 }
 ```
 
@@ -86,7 +123,8 @@ GET    /api/clients              ?search=&status=active|inactive&page=&limit=
 GET    /api/clients/stats        → { total, ativos, inativos, quitados, atrasados }
 GET    /api/clients/quitados     → [{ id, nome, cpf }]
 GET    /api/clients/:id          → Client com loans[]
-POST   /api/clients              multipart/form-data (foto, rg, comprovante)
+GET    /api/clients/:id/document-urls → { fotoUrl, rgUrl, comprovanteUrl } (URLs assinadas 1h)
+POST   /api/clients              multipart/form-data (foto, rg, comprovante → Supabase Storage)
 PATCH  /api/clients/:id          multipart/form-data
 DELETE /api/clients/:id          soft-delete (active: false)
 ```
@@ -97,6 +135,12 @@ DELETE /api/clients/:id          soft-delete (active: false)
 - `inativos`: clientes com `active: false`
 - `quitados`: clientes com pelo menos 1 empréstimo `status: quitado`
 - `atrasados`: clientes com pelo menos 1 parcela `status: atrasado`
+
+**Upload de documentos (POST/PATCH):**
+- Arquivos enviados como `multipart/form-data`
+- Backend usa `SupabaseService.uploadFile()` para salvar no bucket `client-documents`
+- Paths salvos no banco: `fotoPath`, `rgPath`, `comprovantePath`
+- Para acessar: chamar `GET /api/clients/:id/document-urls` que retorna URLs assinadas (1h)
 
 ---
 
@@ -142,7 +186,7 @@ POST /api/installments/mark-overdue → marca pendentes vencidas como atrasado (
 ## Módulo Payments
 
 ```
-GET    /api/payments              ?installmentId=&page=
+GET    /api/payments              ?search= (filtra por nome do cliente) — retorna últimos 100
 POST   /api/payments              Registra pagamento + atualiza totalPago + cria Transaction
 DELETE /api/payments/:id/estornar Remove pagamento + recalcula totalPago + cria Transaction saída
 ```
@@ -165,12 +209,12 @@ GET /api/reports/carteira
 Retorna:
 ```json
 {
-  "valorInvestido": 15000.00,      // Soma de valorInvestido (ou valor) dos empréstimos ativos
-  "valorTotalParcelado": 18500.00, // Soma de todas as parcelas dos empréstimos ativos
-  "valorRecebido": 6200.00,        // Total recebido em pagamentos (geral)
-  "aReceber": 12300.00,            // Soma de parcelas pendentes + atrasadas
-  "totalAtivos": 12,               // Quantidade de empréstimos ativos
-  "totalAtrasados": 3              // Quantidade de empréstimos com parcela atrasada
+  "valorInvestido": 15000.00,
+  "valorTotalParcelado": 18500.00,
+  "valorRecebido": 6200.00,
+  "aReceber": 12300.00,
+  "totalAtivos": 12,
+  "totalAtrasados": 3
 }
 ```
 
@@ -183,6 +227,24 @@ Retorna:
 | markOverdue | Diário 08:00 | Marca parcelas vencidas como `atrasado` |
 | sendReminders | Diário 09:00 | Envia lembretes de parcelas próximas |
 | sendOverdueNotices | Diário 10:00 | Envia cobranças de parcelas atrasadas |
+
+---
+
+## DTOs — Observações Importantes
+
+### ValidationPipe global
+Configurado com `whitelist: true, forbidNonWhitelisted: true, transform: true`.
+Qualquer campo não declarado no DTO gera erro 400.
+
+### UpdateClientDto
+Escrito **sem** `PartialType` — todos os campos declarados explicitamente como opcionais.
+Isso é necessário porque `PartialType` de `@nestjs/mapped-types` não registra corretamente
+campos adicionados na subclasse no whitelist do class-validator.
+
+### CPF/CNPJ
+`@Transform(stripNonDigits)` aplicado no DTO antes da validação.
+Regex: `^\d{11}$|^\d{14}$` — aceita CPF (11) ou CNPJ (14 dígitos).
+Frontend envia formatado (`284.351.648-02`); backend strip antes de validar.
 
 ---
 
@@ -200,7 +262,7 @@ export class NovoModule {}
 // 2. Importar em app.module.ts
 imports: [...existingModules, NovoModule]
 
-// 3. Registrar serviço (sem necessidade de Repository — usa PrismaService diretamente)
+// 3. Registrar serviço
 @Injectable()
 export class NovoService {
   constructor(private readonly prisma: PrismaService) {}
@@ -222,12 +284,12 @@ findOne() { ... }
 
 ---
 
-## Banco de Dados
+## Banco de Dados — Tabelas Principais
 
 | Tabela | Model | Descrição |
 |--------|-------|-----------|
-| users | User | Operadores do sistema (bcrypt) |
-| clients | Client | Clientes com soft-delete |
+| users | User | Operadores (bcrypt + supabaseId) |
+| clients | Client | Clientes com soft-delete; paths de documentos no Storage |
 | loans | Loan | Contratos (valorInvestido, taxaJuros, modoTaxa) |
 | installments | Installment | Parcelas geradas automaticamente |
 | payments | Payment | Registros de pagamento |
@@ -238,7 +300,8 @@ findOne() { ... }
 | audit_logs | AuditLog | Histórico de ações |
 | site_settings | SiteSetting | Configurações dinâmicas |
 | support_tickets | SupportTicket | Tickets de suporte |
-| refresh_tokens | RefreshToken | Tokens de refresh (hash SHA-256) |
+
+> **Nota:** Não há tabela `refresh_tokens` — sessões são gerenciadas pelo Supabase Auth (GoTrue).
 
 Schema completo: `backend/prisma/schema.prisma`
 
@@ -252,7 +315,7 @@ cd D:\LIDERA\SIAFI\backend
 # Compilar TypeScript → dist/
 npm run build
 
-# Gerar/aplicar migrações
+# Aplicar migrações (usa DIRECT_URL :5432)
 npx prisma migrate deploy
 
 # Gerar client Prisma (após alterar schema)
@@ -262,6 +325,20 @@ npx prisma generate
 npm run build; echo "Exit: $LASTEXITCODE"
 ```
 
+### Restart do serviço NSSM
+
+```powershell
+sc.exe stop SIAFI-API
+# Se o processo ainda estiver vivo na porta 4010:
+# netstat -ano | findstr :4010  → obter PID
+# taskkill /PID <PID> /F
+sc.exe start SIAFI-API
+```
+
+> **Atenção:** NSSM pode deixar o processo Node.js vivo (zombie) na porta 4010 após o stop.
+> Verificar com `netstat` e fazer `taskkill /F` se necessário antes do start.
+> Solução permanente: configurar `AppKillProcessTree = 1` no NSSM.
+
 ---
 
-*Última atualização: 2026-05-19*
+*Última atualização: 2026-05-20*

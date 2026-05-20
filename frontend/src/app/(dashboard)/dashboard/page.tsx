@@ -10,6 +10,8 @@ import { formatDate } from '@/lib/utils'
 import api from '@/lib/api'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
+import { useRealtimeDashboard } from '@/hooks/useRealtimeDashboard'
+import { useAuth } from '@/contexts/auth.context'
 
 interface ClientStats {
   total: number
@@ -102,6 +104,10 @@ function StatCard({ title, value, icon: Icon, color, isLoading, href }: StatCard
 }
 
 export default function DashboardPage() {
+  const { connected } = useRealtimeDashboard()
+  const { user } = useAuth()
+  const canSeeLoansStats = user?.role === 'admin' || user?.role === 'financeiro'
+
   const results = useQueries({
     queries: [
       {
@@ -111,6 +117,7 @@ export default function DashboardPage() {
       {
         queryKey: ['loans', 'stats'],
         queryFn: () => api.get<LoanStats>('/loans/stats').then((r) => r.data),
+        enabled: canSeeLoansStats,
       },
       {
         queryKey: ['installments', 'overdue'],
@@ -147,7 +154,15 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Visão Geral</h2>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-2xl font-bold tracking-tight">Visão Geral</h2>
+            <span title={connected ? 'Realtime conectado' : 'Conectando...'} className="relative flex size-2 shrink-0">
+              {connected && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              )}
+              <span className={cn('relative inline-flex rounded-full size-2', connected ? 'bg-green-500' : 'bg-slate-300')} />
+            </span>
+          </div>
           <p className="text-muted-foreground text-sm mt-1">Resumo financeiro atualizado em tempo real</p>
         </div>
         <div className="flex items-center gap-3">

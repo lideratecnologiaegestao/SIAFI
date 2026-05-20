@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -99,7 +100,8 @@ model User {
   password            String    @db.VarChar(255)
   role                UserRole  @default(usuario)
   active              Boolean   @default(true)
-  // MFA (TOTP — RFC 6238)
+  // Supabase Auth integration
+  supabaseId          String?   @unique          @map("supabase_id")
   mfaEnabled          Boolean   @default(false)  @map("mfa_enabled")
   mfaSecret           String?   @db.VarChar(64)  @map("mfa_secret")
   // Login security (ISO/IEC 27001 — A.9.4)
@@ -110,30 +112,11 @@ model User {
   createdAt           DateTime  @default(now())   @map("created_at")
   updatedAt           DateTime  @updatedAt        @map("updated_at")
 
-  refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
   transactions  Transaction[]
   client        Client?
 
   @@map("users")
-}
-
-// ─── RefreshToken ─────────────────────────────────────────────────────────────
-
-model RefreshToken {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique @db.VarChar(512)
-  userId    Int      @map("user_id")
-  expiresAt DateTime @map("expires_at")
-  // Session fingerprinting para detecção de roubo de token
-  userAgent String?  @db.VarChar(512) @map("user_agent")
-  ip        String?  @db.VarChar(45)
-  createdAt DateTime @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("refresh_tokens")
 }
 
 // ─── Client ───────────────────────────────────────────────────────────────────
