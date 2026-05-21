@@ -1,0 +1,301 @@
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import type { RequestUser } from '../auth/guards/supabase-auth.guard';
+import { CreateSolicitacaoDto, ResponderSolicitacaoDto } from './dto/create-solicitacao.dto';
+import { CreateIntencaoDto, AprovarIntencaoDto } from './dto/create-intencao.dto';
+import { CreateCobrancaDto } from './dto/create-cobranca.dto';
+
+@Injectable()
+export class ConsultorService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  // ─── Carteira do consultor ────────────────────────────────────────────────
+
+  async getCarteira(consultorId: number) {
+    return this.prisma.client.findMany({
+      where: { consultorId, active: true },
+      orderBy: { nome: 'asc' },
+      select: {
+        id: true,
+        nome: true,
+        cpf: true,
+        whatsapp: true,
+        loans: {
+          where: { status: { in: ['ativo', 'inadimplente'] } },
+          select: {
+            id: true,
+            status: true,
+            principalAmount: true,
+            totalReceivable: true,
+            numeroParcelas: true,
+          },
+        },
+      },
+    });
+  }
+
+  async getStats(consultorId: number) {
+    const [totalClientes, emprestimoAtivos, parcelas] = await Promise.all([
+      this.prisma.client.count({ where: { consultorId, active: true } }),
+      this.prisma.loan.count({
+        where: { client: { consultorId }, status: 'ativo' },
+      }),
+      this.prisma.installment.count({
+        where: { loan: { client: { consultorId } }, status: 'atrasado' },
+      }),
+    ]);
+    return { totalClientes, emprestimoAtivos, parcelasAtrasadas: parcelas };
+  }
+
+  // ─── Solicitações ─────────────────────────────────────────────────────────
+
+  async criarSolicitacao(dto: CreateSolicitacaoDto, currentUser: RequestUser) {
+    const isConsultor = currentUser.role === 'consultor';
+    const consultorId = isConsultor ? currentUser.id : (dto as any).consultorId;
+
+    if (isConsultor) {
+      await this.assertClientePertenceConsultor(dto.clientId, currentUser.id);
+    }
+
+    const solicitacao = await this.prisma.consultorSolicitacao.create({
+      data: {
+        consultorId,
+        clientId: dto.clientId,
+        loanId: dto.loanId ?? null,
+        tipo: dto.tipo,
+        descricao: dto.descricao,
+        valorSolicitado: dto.valorSolicitado ?? null,
+      },
+      include: { client: { select: { nome: true } } },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: currentUser.id,
+        acao: 'SOLICITACAO_CONSULTOR_CRIADA',
+        entidade: 'ConsultorSolicitacao',
+        entidadeId: solicitacao.id,
+        dados: { tipo: dto.tipo, clienteNome: solicitacao.client.nome },
+      },
+    }).catch(() => {});
+
+    return solicitacao;
+  }
+
+  async listarSolicitacoes(currentUser: RequestUser, status?: string) {
+    const where: Record<string, unknown> = {};
+
+    if (currentUser.role === 'consultor') {
+      where.consultorId = currentUser.id;
+    }
+
+    if (status) where.status = status;
+
+    return this.prisma.consultorSolicitacao.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        consultor: { select: { nome: true } },
+        client: { select: { nome: true, cpf: true } },
+        loan: { select: { id: true, status: true } },
+      },
+    });
+  }
+
+  async responderSolicitacao(
+    id: number,
+    dto: ResponderSolicitacaoDto,
+    currentUser: RequestUser,
+  ) {
+    const sol = await this.prisma.consultorSolicitacao.findUnique({ where: { id } });
+    if (!sol) throw new NotFoundException('Solicitação não encontrada');
+    if (sol.status !== 'pendente') {
+      throw new ForbiddenException('Solicitação já foi respondida');
+    }
+
+    return this.prisma.consultorSolicitacao.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        respostaFinanceiro: dto.respostaFinanceiro ?? null,
+        respondidoPor: currentUser.id,
+        respondidoEm: new Date(),
+      },
+    });
+  }
+
+  // ─── Intenções de empréstimo ──────────────────────────────────────────────
+
+  async criarIntencao(dto: CreateIntencaoDto, currentUser: RequestUser) {
+    if (currentUser.role === 'consultor') {
+      await this.assertClientePertenceConsultor(dto.clientId, currentUser.id);
+    }
+
+    const intencao = await this.prisma.intencaoEmprestimo.create({
+      data: {
+        clientId: dto.clientId,
+        consultorId: currentUser.id,
+        valorSolicitado: dto.valorSolicitado,
+        numeroParcelas: dto.numeroParcelas,
+        finalidade: dto.finalidade ?? null,
+        observacoes: dto.observacoes ?? null,
+      },
+      include: { client: { select: { nome: true } } },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: currentUser.id,
+        acao: 'INTENCAO_EMPRESTIMO_CRIADA',
+        entidade: 'IntencaoEmprestimo',
+        entidadeId: intencao.id,
+        dados: { valorSolicitado: dto.valorSolicitado, clienteNome: intencao.client.nome },
+      },
+    }).catch(() => {});
+
+    return intencao;
+  }
+
+  async listarIntencoes(currentUser: RequestUser, status?: string) {
+    const where: Record<string, unknown> = {};
+
+    if (currentUser.role === 'consultor') {
+      where.consultorId = currentUser.id;
+    }
+
+    if (status) where.status = status;
+
+    return this.prisma.intencaoEmprestimo.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        client: { select: { nome: true, cpf: true } },
+        consultor: { select: { nome: true } },
+      },
+    });
+  }
+
+  async aprovarIntencao(id: number, dto: AprovarIntencaoDto, currentUser: RequestUser) {
+    const intencao = await this.prisma.intencaoEmprestimo.findUnique({ where: { id } });
+    if (!intencao) throw new NotFoundException('Intenção não encontrada');
+    if (intencao.status !== 'aguardando') {
+      throw new ForbiddenException('Intenção já foi processada');
+    }
+
+    return this.prisma.intencaoEmprestimo.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        observacoes: dto.observacoes ?? intencao.observacoes,
+        aprovadoPor: currentUser.id,
+        aprovadoEm: new Date(),
+      },
+    });
+  }
+
+  // ─── Cobranças ────────────────────────────────────────────────────────────
+
+  async registrarCobranca(dto: CreateCobrancaDto, currentUser: RequestUser) {
+    if (currentUser.role === 'consultor') {
+      await this.assertClientePertenceConsultor(dto.clientId, currentUser.id);
+    }
+
+    return this.prisma.cobrancaContato.create({
+      data: {
+        installmentId: dto.installmentId,
+        clientId: dto.clientId,
+        consultorId: currentUser.id,
+        canal: dto.canal,
+        resultado: dto.resultado,
+        prometeuPagarEm: dto.prometeuPagarEm ? new Date(dto.prometeuPagarEm) : null,
+        observacao: dto.observacao ?? null,
+      },
+    });
+  }
+
+  async listarCobrancas(currentUser: RequestUser, clientId?: number) {
+    const where: Record<string, unknown> = {};
+
+    if (currentUser.role === 'consultor') {
+      where.consultorId = currentUser.id;
+    }
+
+    if (clientId) where.clientId = clientId;
+
+    return this.prisma.cobrancaContato.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        client: { select: { nome: true } },
+        installment: { select: { numero: true, installmentAmount: true, dataVencimento: true } },
+      },
+    });
+  }
+
+  // ─── Detalhe de cliente da carteira ──────────────────────────────────────
+
+  async getClienteDetalhe(clientId: number, consultorId: number) {
+    await this.assertClientePertenceConsultor(clientId, consultorId);
+
+    return this.prisma.client.findUnique({
+      where: { id: clientId },
+      select: {
+        id: true,
+        nome: true,
+        cpf: true,
+        whatsapp: true,
+        email: true,
+        cidade: true,
+        estado: true,
+        portalAtivo: true,
+        active: true,
+        loans: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            principalAmount: true,
+            totalReceivable: true,
+            numeroParcelas: true,
+            status: true,
+            dataInicio: true,
+            installments: {
+              where: { status: 'atrasado' },
+              select: { id: true },
+            },
+          },
+        },
+        cobrancaContatos: {
+          where: { consultorId },
+          orderBy: { createdAt: 'desc' },
+          take: 15,
+          select: {
+            id: true,
+            canal: true,
+            resultado: true,
+            prometeuPagarEm: true,
+            observacao: true,
+            createdAt: true,
+            installment: {
+              select: { numero: true, installmentAmount: true, dataVencimento: true },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  // ─── Helper ───────────────────────────────────────────────────────────────
+
+  private async assertClientePertenceConsultor(clientId: number, consultorId: number) {
+    const client = await this.prisma.client.findFirst({
+      where: { id: clientId, consultorId },
+    });
+    if (!client) {
+      throw new ForbiddenException('Cliente não pertence à sua carteira');
+    }
+  }
+}

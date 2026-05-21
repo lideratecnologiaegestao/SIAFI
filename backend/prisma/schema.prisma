@@ -13,12 +13,14 @@ datasource db {
 enum UserRole {
   admin
   financeiro
+  consultor
   caixa
-  usuario
   cliente
 }
 
 enum LoanStatus {
+  aguardando_aceite    // gerado pelo financeiro, aguarda assinatura do cliente
+  aguardando_liberacao // aceito pelo cliente, aguarda confirmação de entrega pelo caixa
   ativo
   quitado
   cancelado
@@ -27,6 +29,7 @@ enum LoanStatus {
 
 enum InstallmentStatus {
   pendente
+  parcialmente_pago    // totalPago > 0 mas < installmentAmount
   pago
   atrasado
   cancelado
@@ -41,14 +44,12 @@ enum PaymentMethod {
   cartao
 }
 
-// Tabela de amortização — determina como as parcelas são calculadas
 enum AmortizationType {
-  simples // Juros Simples — parcelas iguais calculadas sobre o principal
-  price   // Tabela Price / Francês — PMT constante, juros decrescentes
-  sac     // SAC — amortização constante, parcelas decrescentes
+  simples
+  price
+  sac
 }
 
-// Identidade de gênero — formulários inclusivos (LGBTQIA+)
 enum GenderIdentity {
   masculino
   feminino
@@ -59,7 +60,6 @@ enum GenderIdentity {
   prefiro_nao_informar
 }
 
-// Tipos de consentimento LGPD
 enum ConsentType {
   uso_dados
   comunicacao_whatsapp
@@ -73,7 +73,6 @@ enum ConsentAction {
   revogado
 }
 
-// Nível de risco de crédito
 enum RiskLevel {
   muito_baixo
   baixo
@@ -83,7 +82,6 @@ enum RiskLevel {
   sem_score
 }
 
-// Status de solicitação de exclusão de dados (Direito ao Esquecimento — LGPD Art. 18)
 enum DataDeletionStatus {
   solicitado
   em_analise
@@ -98,23 +96,31 @@ model User {
   nome                String
   username            String    @unique
   password            String    @db.VarChar(255)
-  role                UserRole  @default(usuario)
+  role                UserRole  @default(caixa)
+  email               String?   @unique
   active              Boolean   @default(true)
-  // Supabase Auth integration
-  supabaseId          String?   @unique          @map("supabase_id")
-  mfaEnabled          Boolean   @default(false)  @map("mfa_enabled")
-  mfaSecret           String?   @db.VarChar(64)  @map("mfa_secret")
-  // Login security (ISO/IEC 27001 — A.9.4)
-  failedLoginAttempts Int       @default(0)       @map("failed_login_attempts")
-  lockedUntil         DateTime?                   @map("locked_until")
-  lastLoginAt         DateTime?                   @map("last_login_at")
-  lastLoginIp         String?   @db.VarChar(45)  @map("last_login_ip")
-  createdAt           DateTime  @default(now())   @map("created_at")
-  updatedAt           DateTime  @updatedAt        @map("updated_at")
+  supabaseId          String?   @unique         @map("supabase_id")
+  mfaEnabled          Boolean   @default(false) @map("mfa_enabled")
+  mfaSecret           String?   @db.VarChar(64) @map("mfa_secret")
+  mfaLoginCount       Int       @default(0)     @map("mfa_login_count")
+  mfaDecidedAt        DateTime?                 @map("mfa_decided_at")
+  failedLoginAttempts Int       @default(0)     @map("failed_login_attempts")
+  lockedUntil         DateTime?                 @map("locked_until")
+  lastLoginAt         DateTime?                 @map("last_login_at")
+  lastLoginIp         String?   @db.VarChar(45) @map("last_login_ip")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt      @map("updated_at")
 
-  auditLogs     AuditLog[]
-  transactions  Transaction[]
-  client        Client?
+  auditLogs                  AuditLog[]
+  transactions               Transaction[]
+  client                     Client?
+  clientesCarteira           Client[]                    @relation("ClienteConsultor")
+  loansComoConsultor         Loan[]                      @relation("LoanConsultor")
+  solicitacoesConsultor      ConsultorSolicitacao[]
+  intencoesConsultor         IntencaoEmprestimo[]
+  mensagensEnviadas          Mensagem[]                  @relation("MensagemRemetente")
+  conversasParticipadas      ConversaParticipante[]      @relation("ParticipaConversa")
+  solicitacoesReparcela      SolicitacaoReparcelamento[] @relation("ConsultorReparcelamento")
 
   @@map("users")
 }
@@ -122,109 +128,135 @@ model User {
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 model Client {
-  id                Int             @id @default(autoincrement())
-  nome              String
-  nomeSocial        String?                          @map("nome_social")
-  identidadeGenero  GenderIdentity?                  @map("identidade_genero")
-  pronome           String?         @db.VarChar(30)  // ex: "ele/dele", "ela/dela", "eles/deles"
-  // Dados sensíveis — cifrados na camada de aplicação (AES-256-GCM) antes de persistir
-  cpf               String?         @unique @db.VarChar(255)
-  rg                String?         @db.VarChar(255)
-  dataNascimento    DateTime?       @map("data_nascimento")
-  email             String?
-  whatsapp          String?
-  telefone          String?
-  endereco          String?
-  bairro            String?
-  cidade            String?
-  estado            String?         @db.Char(2)
-  cep               String?
-  fotoPath          String?         @map("foto_path")
-  rgPath            String?         @map("rg_path")
-  comprovantePath   String?         @map("comprovante_path")
-  // Vínculo com conta de acesso ao portal do cliente
-  userId            Int?            @unique           @map("user_id")
-  active            Boolean         @default(true)
-  notificacoesEmail Boolean         @default(true)   @map("notificacoes_email")
-  observacoes       String?         @db.Text
-  // LGPD
-  lgpdConsentAt     DateTime?       @map("lgpd_consent_at")
-  anonimizadoEm     DateTime?       @map("anonimizado_em")
-  // Credit scoring
-  riskLevel         RiskLevel       @default(sem_score) @map("risk_level")
-  scoreNumerico     Int?            @map("score_numerico")
-  createdAt         DateTime        @default(now())  @map("created_at")
-  updatedAt         DateTime        @updatedAt       @map("updated_at")
+  id                   Int             @id @default(autoincrement())
+  nome                 String
+  nomeSocial           String?                          @map("nome_social")
+  identidadeGenero     GenderIdentity?                  @map("identidade_genero")
+  pronome              String?         @db.VarChar(30)
+  cpf                  String?         @unique @db.VarChar(255)
+  rg                   String?         @db.VarChar(255)
+  dataNascimento       DateTime?       @map("data_nascimento")
+  email                String?
+  whatsapp             String?
+  telefone             String?
+  endereco             String?
+  bairro               String?
+  cidade               String?
+  estado               String?         @db.Char(2)
+  cep                  String?
+  fotoPath             String?         @map("foto_path")
+  rgPath               String?         @map("rg_path")
+  comprovantePath      String?         @map("comprovante_path")
+  userId               Int?            @unique           @map("user_id")
+  active               Boolean         @default(true)
+  notificacoesEmail    Boolean         @default(true)    @map("notificacoes_email")
+  notificacoesWhatsapp Boolean         @default(true)    @map("notificacoes_whatsapp")
+  observacoes          String?         @db.Text
+  lgpdConsentAt        DateTime?       @map("lgpd_consent_at")
+  anonimizadoEm        DateTime?       @map("anonimizado_em")
+  riskLevel            RiskLevel       @default(sem_score) @map("risk_level")
+  scoreNumerico        Int?            @map("score_numerico")
+  supabaseId           String?         @unique           @map("supabase_id")
+  portalAtivo          Boolean         @default(false)   @map("portal_ativo")
+  portalAtivadoEm      DateTime?       @map("portal_ativado_em")
+  portalAtivadoPor     Int?            @map("portal_ativado_por")
+  senhaTemporaria      Boolean         @default(false)   @map("senha_temporaria")
+  primeiroAcesso       Boolean         @default(true)    @map("primeiro_acesso")
+  ultimoAcessoPortal   DateTime?       @map("ultimo_acesso_portal")
+  mfaEnabled           Boolean         @default(false)   @map("mfa_enabled")
+  mfaLoginCount        Int             @default(0)       @map("mfa_login_count")
+  mfaDecidedAt         DateTime?       @map("mfa_decided_at")
+  consultorId          Int?            @map("consultor_id")
+  consultor            User?           @relation("ClienteConsultor", fields: [consultorId], references: [id])
+  createdAt            DateTime        @default(now())   @map("created_at")
+  updatedAt            DateTime        @updatedAt        @map("updated_at")
 
-  user                 User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
-  loans                Loan[]
-  pixPayments          PixPayment[]
-  notifications        Notification[]
-  supportTickets       SupportTicket[]
-  consentLogs          ConsentLog[]
-  creditScores         CreditScore[]
-  dataDeletionRequests DataDeletionRequest[]
+  user                       User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  loans                      Loan[]
+  pixPayments                PixPayment[]
+  notifications              Notification[]
+  supportTickets             SupportTicket[]
+  consentLogs                ConsentLog[]
+  creditScores               CreditScore[]
+  dataDeletionRequests       DataDeletionRequest[]
+  consultorSolicitacoes      ConsultorSolicitacao[]
+  intencoes                  IntencaoEmprestimo[]
+  cobrancaContatos           CobrancaContato[]
+  solicitacoesReparcelamento SolicitacaoReparcelamento[]
+  scoreRisco                 ScoreRisco?
 
   @@index([nome])
   @@index([riskLevel])
+  @@index([consultorId])
   @@map("clients")
 }
 
-// ─── LGPD: Consent Log ────────────────────────────────────────────────────────
+// ─── ConsultorSolicitacao ─────────────────────────────────────────────────────
 
-model ConsentLog {
-  id        Int           @id @default(autoincrement())
-  clientId  Int           @map("client_id")
-  tipo      ConsentType
-  acao      ConsentAction
-  ip        String?       @db.VarChar(45)
-  userAgent String?       @db.VarChar(512) @map("user_agent")
-  createdAt DateTime      @default(now()) @map("created_at")
+model ConsultorSolicitacao {
+  id                 Int       @id @default(autoincrement())
+  consultorId        Int       @map("consultor_id")
+  clientId           Int       @map("client_id")
+  loanId             Int?      @map("loan_id")
+  tipo               String    @db.VarChar(30)
+  descricao          String    @db.Text
+  valorSolicitado    Decimal?  @db.Decimal(10, 2) @map("valor_solicitado")
+  status             String    @default("pendente") @db.VarChar(20)
+  respostaFinanceiro String?   @db.Text @map("resposta_financeiro")
+  respondidoPor      Int?      @map("respondido_por")
+  respondidoEm       DateTime? @map("respondido_em")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt      @map("updated_at")
 
-  client Client @relation(fields: [clientId], references: [id])
+  consultor User   @relation(fields: [consultorId], references: [id])
+  client    Client @relation(fields: [clientId], references: [id])
+  loan      Loan?  @relation(fields: [loanId], references: [id])
 
+  @@index([consultorId])
   @@index([clientId])
-  @@index([tipo, acao])
-  @@map("consent_logs")
+  @@index([status])
+  @@map("consultor_solicitacoes")
 }
 
-// ─── LGPD: Solicitação de Exclusão (Art. 18, VI) ──────────────────────────────
+// ─── IntencaoEmprestimo ───────────────────────────────────────────────────────
 
-model DataDeletionRequest {
-  id           Int                @id @default(autoincrement())
-  clientId     Int                @map("client_id")
-  motivo       String?            @db.Text
-  status       DataDeletionStatus @default(solicitado)
-  analisadoPor Int?               @map("analisado_por")
-  analisadoEm  DateTime?          @map("analisado_em")
-  observacoes  String?            @db.Text
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @updatedAt      @map("updated_at")
+model IntencaoEmprestimo {
+  id              Int       @id @default(autoincrement())
+  clientId        Int       @map("client_id")
+  consultorId     Int       @map("consultor_id")
+  valorSolicitado Decimal   @db.Decimal(10, 2) @map("valor_solicitado")
+  numeroParcelas  Int       @map("numero_parcelas")
+  finalidade      String?   @db.Text
+  status          String    @default("aguardando") @db.VarChar(20)
+  observacoes     String?   @db.Text
+  aprovadoPor     Int?      @map("aprovado_por")
+  aprovadoEm      DateTime? @map("aprovado_em")
+  loanId          Int?      @unique @map("loan_id")
 
-  client Client @relation(fields: [clientId], references: [id])
+  // SLA e controle de prazo
+  motivoRejeicao     String?   @db.Text       @map("motivo_rejeicao")
+  motivoRejeicaoTipo String?   @db.VarChar(50) @map("motivo_rejeicao_tipo")
+  prazoAnaliseHoras  Int       @default(24)   @map("prazo_analise_horas")
+  prazoExpiracaoEm   DateTime?               @map("prazo_expiracao_em")
+  slaNotificado      Boolean   @default(false) @map("sla_notificado")
+  slaEscalonado      Boolean   @default(false) @map("sla_escalonado")
 
-  @@index([clientId, status])
-  @@map("data_deletion_requests")
-}
+  // Feedback ao cliente
+  feedbackEnviadoEm  DateTime? @map("feedback_enviado_em")
+  feedbackEnviadoPor Int?      @map("feedback_enviado_por")
+  feedbackCanal      String?   @db.VarChar(20) @map("feedback_canal")
 
-// ─── Credit Scoring ───────────────────────────────────────────────────────────
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
 
-model CreditScore {
-  id          Int       @id @default(autoincrement())
-  clientId    Int       @map("client_id")
-  score       Int
-  riskLevel   RiskLevel @map("risk_level")
-  // fonte: serasa | boa_vista | interno | quod
-  fonte       String?   @db.VarChar(50)
-  dadosBrutos Json?     @map("dados_brutos")
-  validoAte   DateTime? @map("valido_ate")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  client    Client @relation(fields: [clientId], references: [id])
+  consultor User   @relation(fields: [consultorId], references: [id])
+  conversas Conversa[]
 
-  client Client @relation(fields: [clientId], references: [id])
-
-  @@index([clientId])
-  @@index([validoAte])
-  @@map("credit_scores")
+  @@index([consultorId])
+  @@index([status])
+  @@index([prazoExpiracaoEm])
+  @@map("intencoes_emprestimo")
 }
 
 // ─── Loan ─────────────────────────────────────────────────────────────────────
@@ -232,62 +264,250 @@ model CreditScore {
 model Loan {
   id              Int              @id @default(autoincrement())
   clientId        Int              @map("client_id")
-  // Decimal(15,2) — suporta até R$ 9.999.999.999.999,99
-  valor           Decimal          @db.Decimal(15, 2)
-  valorInvestido  Decimal?         @map("valor_investido") @db.Decimal(15, 2)
-  // Decimal(8,4) — suporta até 9999.9999% com 4 casas decimais para taxa efetiva
-  taxaJuros       Decimal          @map("taxa_juros") @db.Decimal(8, 4)
-  modoTaxa        String           @default("mensal")      @map("modo_taxa")
-  tipoAmortizacao AmortizationType @default(simples)       @map("tipo_amortizacao")
-  numeroParcelas  Int              @map("numero_parcelas")
-  dataInicio      DateTime         @map("data_inicio")
-  status          LoanStatus       @default(ativo)
-  // Encargos por atraso
+  consultorId     Int?             @map("consultor_id")
+
+  principalAmount Decimal          @db.Decimal(15, 2) @map("principal_amount")
+  targetProfit    Decimal          @db.Decimal(15, 2) @map("target_profit")
+  totalReceivable Decimal          @db.Decimal(15, 2) @map("total_receivable")
+
+  taxaJuros       Decimal?         @map("taxa_juros")       @db.Decimal(8, 4)
+  modoTaxa        String?          @default("mensal")       @map("modo_taxa")
+  tipoAmortizacao AmortizationType? @default(simples)       @map("tipo_amortizacao")
+
   taxaMulta       Decimal          @default(2.00) @map("taxa_multa") @db.Decimal(5, 2)
   taxaMora        Decimal          @default(1.00) @map("taxa_mora")  @db.Decimal(5, 2)
   periodoCarencia Int              @default(0)    @map("periodo_carencia")
+
+  numeroParcelas  Int              @map("numero_parcelas")
+  dataInicio      DateTime         @map("data_inicio")
+  status          LoanStatus       @default(ativo)
   metodoPagamento PaymentMethod?   @map("metodo_pagamento")
   observacoes     String?          @db.Text
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt      @map("updated_at")
 
-  client        Client         @relation(fields: [clientId], references: [id])
-  installments  Installment[]
-  renegociacoes Renegociacao[]
-  mpPayments    MpPayment[]
-  notifications Notification[]
+  // Rastreabilidade de reparcelamento
+  origemLoanId        Int?      @unique @map("origem_loan_id")
+  reparcelamentoCount Int       @default(0) @map("reparcelamento_count")
+
+  // Aceite digital do cliente
+  aceiteClienteEm   DateTime? @map("aceite_cliente_em")
+  aceiteClienteIp   String?   @db.VarChar(45) @map("aceite_cliente_ip")
+  aceiteClienteHash String?   @db.VarChar(64) @map("aceite_cliente_hash")
+
+  // SLA de aceite (Parte 1)
+  aceiteExpiraEm      DateTime? @map("aceite_expira_em")
+  aceiteSlaNotificado Boolean   @default(false) @map("aceite_sla_notificado")
+  aceiteSlaConsultor  Boolean   @default(false) @map("aceite_sla_consultor")
+
+  // Liberação de capital (Parte 3)
+  liberadoPor       Int?      @map("liberado_por")
+  liberadoEm        DateTime? @map("liberado_em")
+  metodoLiberacao   String?   @db.VarChar(20) @map("metodo_liberacao")
+
+  // Configurações de cobrança por empréstimo
+  multaPercentual          Decimal?  @db.Decimal(5,4)  @map("multa_percentual")
+  moraDiariaPercentual     Decimal?  @db.Decimal(7,6)  @map("mora_diaria_percentual")
+  diasAntecedenciaCobranca Int       @default(10)       @map("dias_antecedencia_cobranca")
+  diaVencimento            Int?                         @map("dia_vencimento")
+  cobrarWhatsapp           Boolean   @default(true)     @map("cobrar_whatsapp")
+  cobrarEmail              Boolean   @default(true)     @map("cobrar_email")
+  cobrarPortal             Boolean   @default(true)     @map("cobrar_portal")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  client                     Client                    @relation(fields: [clientId], references: [id])
+  consultor                  User?                     @relation("LoanConsultor", fields: [consultorId], references: [id])
+  origemLoan                 Loan?                     @relation("ReparcelamentoOrigem", fields: [origemLoanId], references: [id])
+  reparcelado                Loan?                     @relation("ReparcelamentoOrigem")
+  installments               Installment[]
+  renegociacoes              Renegociacao[]
+  mpPayments                 MpPayment[]
+  notifications              Notification[]
+  consultorSolicitacoes      ConsultorSolicitacao[]
+  solicitacoesReparcelamento SolicitacaoReparcelamento[]
+  conversas                  Conversa[]
 
   @@index([clientId])
+  @@index([consultorId])
   @@index([status])
   @@map("loans")
+}
+
+// ─── SolicitacaoReparcelamento ────────────────────────────────────────────────
+
+model SolicitacaoReparcelamento {
+  id                             Int       @id @default(autoincrement())
+  clientId                       Int       @map("client_id")
+  loanId                         Int       @map("loan_id")
+  consultorId                    Int?      @map("consultor_id")
+  tipo                           String    @db.VarChar(30)
+  motivoCliente                  String    @db.Text @map("motivo_cliente")
+  dataPrevistaPagamento          DateTime? @map("data_prevista_pagamento")
+  status                         String    @default("pendente") @db.VarChar(20)
+
+  // Proposta do financeiro
+  novoValorPrincipal             Decimal?  @db.Decimal(10, 2) @map("novo_valor_principal")
+  novoTargetProfit               Decimal?  @db.Decimal(10, 2) @map("novo_target_profit")
+  novoNumeroParcelas             Int?      @map("novo_numero_parcelas")
+  novaDataInicio                 DateTime? @map("nova_data_inicio")
+  multaAplicada                  Decimal?  @db.Decimal(10, 2) @map("multa_aplicada")
+  moraAplicada                   Decimal?  @db.Decimal(10, 2) @map("mora_aplicada")
+  observacaoFinanceiro           String?   @db.Text @map("observacao_financeiro")
+
+  // Execução
+  novoLoanId                     Int?      @unique @map("novo_loan_id")
+  respondidoPor                  Int?      @map("respondido_por")
+  respondidoEm                   DateTime? @map("respondido_em")
+  executadoPor                   Int?      @map("executado_por")
+  executadoEm                    DateTime? @map("executado_em")
+
+  // Segunda instância
+  aprovadoSegundaInstancia       Boolean   @default(false)   @map("aprovado_segunda_instancia")
+  aprovadoSegundaInstanciaPor    Int?      @map("aprovado_segunda_instancia_por")
+  aprovadoSegundaInstanciaEm     DateTime? @map("aprovado_segunda_instancia_em")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  client    Client  @relation(fields: [clientId], references: [id])
+  loan      Loan    @relation(fields: [loanId], references: [id])
+  consultor User?   @relation("ConsultorReparcelamento", fields: [consultorId], references: [id])
+  conversas Conversa[]
+
+  @@index([clientId])
+  @@index([loanId])
+  @@index([status])
+  @@map("solicitacoes_reparcelamento")
+}
+
+// ─── ScoreRisco ───────────────────────────────────────────────────────────────
+
+model ScoreRisco {
+  id                     Int      @id @default(autoincrement())
+  clientId               Int      @unique @map("client_id")
+  scorePontualidade      Int      @default(100) @map("score_pontualidade")
+  scoreReparcelamentos   Int      @default(100) @map("score_reparcelamentos")
+  scoreQuitacoes         Int      @default(50)  @map("score_quitacoes")
+  scoreGeral             Int      @default(75)  @map("score_geral")
+  classificacao          String   @default("regular") @db.VarChar(20)
+  totalEmprestimos       Int      @default(0)   @map("total_emprestimos")
+  totalQuitados          Int      @default(0)   @map("total_quitados")
+  totalReparcelamentos   Int      @default(0)   @map("total_reparcelamentos")
+  totalParcelasAtrasadas Int      @default(0)   @map("total_parcelas_atrasadas")
+  calculadoEm            DateTime @default(now()) @map("calculado_em")
+  updatedAt              DateTime @updatedAt    @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@map("scores_risco")
+}
+
+// ─── Conversa ─────────────────────────────────────────────────────────────────
+
+model Conversa {
+  id            Int      @id @default(autoincrement())
+  titulo        String?  @db.VarChar(255)
+  tipo          String   @db.VarChar(30) @default("direto")
+  intencaoId    Int?     @map("intencao_id")
+  loanId        Int?     @map("loan_id")
+  solicitacaoId Int?     @map("solicitacao_id")
+  clientId      Int?     @map("client_id")
+  arquivada     Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  intencao      IntencaoEmprestimo?        @relation(fields: [intencaoId], references: [id])
+  loan          Loan?                      @relation(fields: [loanId], references: [id])
+  solicitacao   SolicitacaoReparcelamento? @relation(fields: [solicitacaoId], references: [id])
+  mensagens     Mensagem[]
+  participantes ConversaParticipante[]
+
+  @@index([intencaoId])
+  @@index([loanId])
+  @@index([solicitacaoId])
+  @@map("conversas")
+}
+
+// ─── Mensagem ─────────────────────────────────────────────────────────────────
+
+model Mensagem {
+  id           Int       @id @default(autoincrement())
+  conversaId   Int       @map("conversa_id")
+  remetenteId  Int       @map("remetente_id")
+  conteudo     String    @db.Text
+  tipo         String    @db.VarChar(20) @default("texto")
+  arquivoPath  String?   @db.VarChar(500) @map("arquivo_path")
+  arquivoNome  String?   @db.VarChar(255) @map("arquivo_nome")
+  arquivoMime  String?   @db.VarChar(100) @map("arquivo_mime")
+  lida         Boolean   @default(false)
+  lidaEm       DateTime? @map("lida_em")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  conversa  Conversa @relation(fields: [conversaId], references: [id])
+  remetente User     @relation("MensagemRemetente", fields: [remetenteId], references: [id])
+
+  @@index([conversaId])
+  @@index([remetenteId])
+  @@map("mensagens")
+}
+
+// ─── ConversaParticipante ─────────────────────────────────────────────────────
+
+model ConversaParticipante {
+  id            Int       @id @default(autoincrement())
+  conversaId    Int       @map("conversa_id")
+  userId        Int       @map("user_id")
+  role          String    @db.VarChar(20) @default("membro")
+  silenciado    Boolean   @default(false)
+  ultimaLeitura DateTime? @map("ultima_leitura")
+  entradaEm     DateTime  @default(now()) @map("entrada_em")
+
+  conversa Conversa @relation(fields: [conversaId], references: [id])
+  user     User     @relation("ParticipaConversa", fields: [userId], references: [id])
+
+  @@unique([conversaId, userId])
+  @@map("conversa_participantes")
 }
 
 // ─── Installment ──────────────────────────────────────────────────────────────
 
 model Installment {
-  id             Int               @id @default(autoincrement())
-  loanId         Int               @map("loan_id")
-  numero         Int
-  // Valor da parcela (principal + juros + encargos)
-  valor          Decimal           @db.Decimal(15, 2)
-  // Decomposição da parcela — essencial para Price e SAC
-  valorPrincipal Decimal?          @map("valor_principal") @db.Decimal(15, 2)
-  valorJuros     Decimal?          @map("valor_juros")     @db.Decimal(15, 2)
-  // Saldo devedor após o pagamento desta parcela
-  saldoDevedor   Decimal?          @map("saldo_devedor")   @db.Decimal(15, 2)
-  // Encargos calculados no momento em que a parcela foi marcada como atrasada
-  valorMulta     Decimal           @default(0) @map("valor_multa") @db.Decimal(15, 2)
-  valorMora      Decimal           @default(0) @map("valor_mora")  @db.Decimal(15, 2)
-  dataVencimento DateTime          @map("data_vencimento")
-  status         InstallmentStatus @default(pendente)
-  totalPago      Decimal           @default(0) @map("total_pago") @db.Decimal(15, 2)
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt      @map("updated_at")
+  id                Int               @id @default(autoincrement())
+  loanId            Int               @map("loan_id")
+  numero            Int
 
-  loan        Loan         @relation(fields: [loanId], references: [id])
-  payments    Payment[]
-  pixPayments PixPayment[]
-  mpPayments  MpPayment[]
+  installmentAmount Decimal           @db.Decimal(15, 2) @map("installment_amount")
+  principalPayback  Decimal           @db.Decimal(15, 2) @map("principal_payback")
+  netGain           Decimal           @db.Decimal(15, 2) @map("net_gain")
+
+  valorPrincipal    Decimal?          @map("valor_principal") @db.Decimal(15, 2)
+  valorJuros        Decimal?          @map("valor_juros")     @db.Decimal(15, 2)
+  saldoDevedor      Decimal           @default(0) @map("saldo_devedor")   @db.Decimal(15, 2)
+  moraAcumulada     Decimal           @default(0) @map("mora_acumulada")  @db.Decimal(10, 2)
+
+  valorMulta        Decimal           @default(0) @map("valor_multa") @db.Decimal(15, 2)
+  valorMora         Decimal           @default(0) @map("valor_mora")  @db.Decimal(15, 2)
+
+  dataVencimento    DateTime          @map("data_vencimento")
+  status            InstallmentStatus @default(pendente)
+  totalPago         Decimal           @default(0) @map("total_pago") @db.Decimal(15, 2)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt      @map("updated_at")
+
+  // Cobrança antecipada
+  cobrancaEnviadaEm  DateTime?         @map("cobranca_enviada_em")
+  cobrancaWhatsappOk Boolean           @default(false) @map("cobranca_whatsapp_ok")
+  cobrancaEmailOk    Boolean           @default(false) @map("cobranca_email_ok")
+  cobrancaPortalOk   Boolean           @default(false) @map("cobranca_portal_ok")
+  multaAplicada      Decimal           @default(0) @db.Decimal(10,2) @map("multa_aplicada")
+  valorComEncargos   Decimal?          @db.Decimal(15,2) @map("valor_com_encargos")
+  pixCobrancaId      Int?              @map("pix_cobranca_id")
+
+  loan             Loan              @relation(fields: [loanId], references: [id])
+  payments         Payment[]
+  pixPayments      PixPayment[]
+  mpPayments       MpPayment[]
+  cobrancaContatos CobrancaContato[]
 
   @@index([loanId])
   @@index([status])
@@ -304,7 +524,6 @@ model Payment {
   dataPagamento   DateTime      @map("data_pagamento")
   metodoPagamento PaymentMethod @default(dinheiro) @map("metodo_pagamento")
   observacao      String?       @db.Text
-  // Controle de estorno — mantém o registro original imutável
   estornado       Boolean       @default(false)
   estornadoEm     DateTime?     @map("estornado_em")
   estornadoPor    Int?          @map("estornado_por")
@@ -321,7 +540,6 @@ model Payment {
 
 model Transaction {
   id        Int      @id @default(autoincrement())
-  // "entrada" | "saida" — mantido como String para compatibilidade com legado
   tipo      String   @db.VarChar(10)
   valor     Decimal  @db.Decimal(15, 2)
   descricao String?
@@ -345,14 +563,14 @@ model PixPayment {
   installmentId  Int       @map("installment_id")
   clientId       Int       @map("client_id")
   paymentId      String?   @map("payment_id")
-  tipo           String    @default("pix")              // "pix" | "boleto"
+  tipo           String    @default("pix")
   qrCode         String?   @map("qr_code") @db.Text
   qrImage        String?   @map("qr_image") @db.Text
   barcodeContent String?   @map("barcode_content") @db.Text
   boletoUrl      String?   @map("boleto_url") @db.VarChar(500)
-  amount         Decimal   @db.Decimal(15, 2)           // saldo da parcela
-  valorEncargos  Decimal?  @map("valor_encargos") @db.Decimal(15, 2) // mora + multa (reemissões)
-  status         String    @default("pendente")         // pendente | pago | expirado | cancelado
+  amount         Decimal   @db.Decimal(15, 2)
+  valorEncargos  Decimal?  @map("valor_encargos") @db.Decimal(15, 2)
+  status         String    @default("pendente")
   expiresAt      DateTime? @map("expires_at")
   sentWhatsapp   Boolean   @default(false) @map("sent_whatsapp")
   sentAt         DateTime? @map("sent_at")
@@ -400,7 +618,6 @@ model Renegociacao {
   taxaJuros               Decimal          @map("taxa_juros")  @db.Decimal(8, 4)
   tipoAmortizacao         AmortizationType @default(simples)   @map("tipo_amortizacao")
   dataInicio              DateTime         @map("data_inicio")
-  // IDs das parcelas originais canceladas — rastreabilidade da renegociação
   parcelasRenegociadasIds Json?            @map("parcelas_renegociadas_ids")
   valorDescontado         Decimal?         @map("valor_descontado") @db.Decimal(15, 2)
   motivoRenegociacao      String?          @db.VarChar(100)    @map("motivo_renegociacao")
@@ -442,11 +659,10 @@ model AuditLog {
   acao        String
   entidade    String?
   entidadeId  Int?     @map("entidade_id")
-  // Snapshots imutáveis — nunca atualizar estes campos após criação
   dadosAntes  Json?    @map("dados_antes")
   dadosDepois Json?    @map("dados_depois")
+  dados       Json?
   contexto    Json?
-  // Hash SHA-256 para detecção de adulteração do log
   hash        String?  @db.VarChar(64)
   ip          String?  @db.VarChar(45)
   userAgent   String?  @db.VarChar(512) @map("user_agent")
@@ -478,6 +694,7 @@ model SupportTicket {
   mensagem  String   @db.Text
   status    String   @default("aberto")
   resposta  String?  @db.Text
+  lido      Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt      @map("updated_at")
 
@@ -486,4 +703,78 @@ model SupportTicket {
   @@index([clientId])
   @@index([status])
   @@map("support_tickets")
+}
+
+// ─── CobrancaContato ──────────────────────────────────────────────────────────
+
+model CobrancaContato {
+  id              Int       @id @default(autoincrement())
+  installmentId   Int       @map("installment_id")
+  clientId        Int       @map("client_id")
+  consultorId     Int       @map("consultor_id")
+  canal           String    @db.VarChar(20)
+  resultado       String    @db.VarChar(50)
+  prometeuPagarEm DateTime? @map("prometeu_pagar_em")
+  observacao      String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  installment Installment @relation(fields: [installmentId], references: [id])
+  client      Client      @relation(fields: [clientId], references: [id])
+
+  @@index([installmentId])
+  @@index([clientId])
+  @@index([consultorId])
+  @@map("cobranca_contatos")
+}
+
+// ─── LGPD ─────────────────────────────────────────────────────────────────────
+
+model ConsentLog {
+  id        Int           @id @default(autoincrement())
+  clientId  Int           @map("client_id")
+  tipo      ConsentType
+  acao      ConsentAction
+  ip        String?       @db.VarChar(45)
+  userAgent String?       @db.VarChar(512) @map("user_agent")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([tipo, acao])
+  @@map("consent_logs")
+}
+
+model DataDeletionRequest {
+  id           Int                @id @default(autoincrement())
+  clientId     Int                @map("client_id")
+  motivo       String?            @db.Text
+  status       DataDeletionStatus @default(solicitado)
+  analisadoPor Int?               @map("analisado_por")
+  analisadoEm  DateTime?          @map("analisado_em")
+  observacoes  String?            @db.Text
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt      @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId, status])
+  @@map("data_deletion_requests")
+}
+
+model CreditScore {
+  id          Int       @id @default(autoincrement())
+  clientId    Int       @map("client_id")
+  score       Int
+  riskLevel   RiskLevel @map("risk_level")
+  fonte       String?   @db.VarChar(50)
+  dadosBrutos Json?     @map("dados_brutos")
+  validoAte   DateTime? @map("valido_ate")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([validoAte])
+  @@map("credit_scores")
 }

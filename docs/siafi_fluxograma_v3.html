@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIAFI — Fluxograma de Empréstimos v2</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f3;color:#1a1a18;padding:24px}
+h1{font-size:18px;font-weight:500;margin-bottom:4px}
+.subtitle{font-size:13px;color:#73726c;margin-bottom:16px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+.li{display:flex;align-items:center;gap:6px;font-size:12px;color:#5F5E5A}
+.ld{width:12px;height:12px;border-radius:2px;border:0.5px solid;flex-shrink:0}
+.scroll-wrap{overflow:auto;border:0.5px solid #d3d1c7;border-radius:12px;background:#fff;padding:24px;max-height:88vh}
+.canvas{position:relative;width:1600px;height:2200px}
+
+.node{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:8px;border:0.5px solid;padding:8px 14px;cursor:pointer;transition:opacity .15s,transform .1s;user-select:none}
+.node:hover{opacity:.85;transform:translateY(-1px)}
+.nt{font-size:13px;font-weight:500;line-height:1.3}
+.ns{font-size:11px;line-height:1.3;margin-top:3px}
+.pill{border-radius:22px!important;height:40px!important}
+.w160{width:160px}
+.w200{width:200px;height:56px}
+.w240{width:240px;height:56px}
+.w180{width:180px;height:56px}
+
+.purple{background:#EEEDFE;border-color:#534AB7;color:#3C3489}.purple .ns{color:#534AB7}
+.teal{background:#E1F5EE;border-color:#0F6E56;color:#085041}.teal .ns{color:#0F6E56}
+.green{background:#EAF3DE;border-color:#3B6D11;color:#27500A}.green .ns{color:#3B6D11}
+.red{background:#FCEBEB;border-color:#A32D2D;color:#791F1F}.red .ns{color:#A32D2D}
+.amber{background:#FAEEDA;border-color:#854F0B;color:#633806}.amber .ns{color:#854F0B}
+.blue{background:#E6F1FB;border-color:#185FA5;color:#0C447C}.blue .ns{color:#185FA5}
+.gray{background:#F1EFE8;border-color:#888780;color:#444441}.gray .ns{color:#5F5E5A}
+.coral{background:#FAECE7;border-color:#993C1D;color:#712B13}.coral .ns{color:#993C1D}
+
+.diamond{position:absolute;width:150px;height:150px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:opacity .15s}
+.diamond:hover{opacity:.85}
+.ds{position:absolute;width:106px;height:106px;transform:rotate(45deg);border-radius:6px;background:#FAEEDA;border:0.5px solid #854F0B}
+.dl{position:relative;z-index:1;text-align:center;font-size:12px;font-weight:500;color:#633806;line-height:1.3;pointer-events:none;padding:0 12px}
+
+svg.lines{position:absolute;top:0;left:0;width:1600px;height:2200px;overflow:visible;pointer-events:none}
+
+.tag{position:absolute;font-size:10px;font-weight:500;padding:2px 7px;border-radius:10px;pointer-events:none}
+.tag-new{background:#E6F1FB;border:0.5px solid #185FA5;color:#0C447C}
+
+.info-box{position:absolute;padding:10px 14px;background:#F1EFE8;border-radius:8px;border:0.5px solid #d3d1c7;font-size:11px;color:#5F5E5A;line-height:1.7}
+.info-box strong{display:block;font-size:12px;color:#1a1a18;margin-bottom:2px}
+
+.tooltip{display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#2C2C2A;color:#F1EFE8;font-size:12px;padding:8px 16px;border-radius:20px;pointer-events:none;z-index:100;max-width:500px;text-align:center;line-height:1.5}
+.tooltip.show{display:block}
+</style>
+</head>
+<body>
+<h1>SIAFI — Fluxograma de Empréstimos <span style="font-size:13px;font-weight:400;color:#73726c">v3 · cobrança antecipada</span></h1>
+<p class="subtitle">Lidera Tecnologia · Clique em qualquer nó para ver detalhes · <span style="color:#185FA5">Azul = novo neste release</span></p>
+
+<div class="legend">
+  <div class="li"><div class="ld" style="background:#EEEDFE;border-color:#534AB7"></div>Cadastro</div>
+  <div class="li"><div class="ld" style="background:#FAEEDA;border-color:#854F0B"></div>Decisão / SLA</div>
+  <div class="li"><div class="ld" style="background:#EAF3DE;border-color:#3B6D11"></div>Aprovação / Pagamento</div>
+  <div class="li"><div class="ld" style="background:#FCEBEB;border-color:#A32D2D"></div>Rejeição / Inadimplência</div>
+  <div class="li"><div class="ld" style="background:#E1F5EE;border-color:#0F6E56"></div>Parcelas</div>
+  <div class="li"><div class="ld" style="background:#E6F1FB;border-color:#185FA5"></div>Novo neste release</div>
+  <div class="li"><div class="ld" style="background:#FAECE7;border-color:#993C1D"></div>Expiração / Cancelamento</div>
+  <div class="li"><div class="ld" style="background:#E1F5EE;border-color:#0F6E56"></div>Cobrança antecipada</div>
+  <div class="li">
+    <svg width="28" height="12"><line x1="0" y1="6" x2="28" y2="6" stroke="#888" stroke-width="1" stroke-dasharray="4 3"/></svg>
+    Retorno ao ciclo
+  </div>
+</div>
+
+<div class="scroll-wrap"><div class="canvas">
+
+<svg class="lines">
+<defs>
+  <marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="ap" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="aa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#854F0B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="agr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#3B6D11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#E24B4A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="ab" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#185FA5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="ac" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#993C1D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+
+<!-- coluna central: inicio até análise -->
+<line x1="800" y1="80" x2="800" y2="118" stroke="#888780" stroke-width="1" marker-end="url(#ag)"/>
+<line x1="800" y1="194" x2="800" y2="232" stroke="#534AB7" stroke-width="1" marker-end="url(#ap)"/>
+<line x1="800" y1="308" x2="800" y2="346" stroke="#534AB7" stroke-width="1" marker-end="url(#ap)"/>
+<line x1="800" y1="422" x2="800" y2="460" stroke="#534AB7" stroke-width="1" marker-end="url(#ap)"/>
+<line x1="800" y1="536" x2="800" y2="574" stroke="#854F0B" stroke-width="1" marker-end="url(#aa)"/>
+<line x1="800" y1="650" x2="800" y2="710" stroke="#888780" stroke-width="1" marker-end="url(#ag)"/>
+<line x1="800" y1="806" x2="800" y2="840" stroke="#888780" stroke-width="1" marker-end="url(#ag)"/>
+
+<!-- losango aprovação: esquerda=não, direita=sim -->
+<line x1="725" y1="915" x2="260" y2="915" stroke="#E24B4A" stroke-width="1" marker-end="url(#ar)"/>
+<text x="492" y="907" font-size="11" font-weight="500" fill="#A32D2D" text-anchor="middle">Não</text>
+<line x1="875" y1="915" x2="1340" y2="915" stroke="#3B6D11" stroke-width="1" marker-end="url(#agr)"/>
+<text x="1108" y="907" font-size="11" font-weight="500" fill="#3B6D11" text-anchor="middle">Sim</text>
+
+<!-- coluna rejeição -->
+<line x1="160" y1="963" x2="160" y2="1001" stroke="#E24B4A" stroke-width="1" marker-end="url(#ar)"/>
+<line x1="160" y1="1077" x2="160" y2="1115" stroke="#E24B4A" stroke-width="1" marker-end="url(#ar)"/>
+
+<!-- coluna aprovação: contrato aguardando_aceite -->
+<line x1="1440" y1="963" x2="1440" y2="1001" stroke="#3B6D11" stroke-width="1" marker-end="url(#agr)"/>
+
+<!-- SLA aceite: losango -->
+<line x1="1440" y1="1077" x2="1440" y2="1111" stroke="#185FA5" stroke-width="1" marker-end="url(#ab)"/>
+
+<!-- SLA aceite: sim (assinou) vai para baixo -->
+<line x1="1440" y1="1261" x2="1440" y2="1299" stroke="#3B6D11" stroke-width="1" marker-end="url(#agr)"/>
+<text x="1452" y="1284" font-size="11" font-weight="500" fill="#3B6D11">Sim</text>
+
+<!-- SLA aceite: não (expirou) vai para esquerda -->
+<line x1="1365" y1="1186" x2="1200" y2="1186" stroke="#993C1D" stroke-width="1" marker-end="url(#ac)"/>
+<text x="1283" y="1178" font-size="11" font-weight="500" fill="#993C1D" text-anchor="middle">Não · expirou</text>
+
+<!-- nó expiração -->
+<line x1="1100" y1="1214" x2="1100" y2="1260" stroke="#993C1D" stroke-width="1" marker-end="url(#ac)"/>
+
+<!-- aguardando liberação -->
+<line x1="1440" y1="1375" x2="1440" y2="1413" stroke="#185FA5" stroke-width="1" marker-end="url(#ab)"/>
+
+<!-- losango liberação: sim/não -->
+<line x1="1440" y1="1563" x2="1440" y2="1601" stroke="#3B6D11" stroke-width="1" marker-end="url(#agr)"/>
+<text x="1452" y="1585" font-size="11" font-weight="500" fill="#3B6D11">Sim</text>
+<line x1="1365" y1="1488" x2="1280" y2="1488" stroke="#888780" stroke-width="0.5" stroke-dasharray="3 3"/>
+<text x="1322" y="1480" font-size="11" fill="#888780" text-anchor="middle">Pendente</text>
+
+<!-- parcelas geradas -->
+<line x1="1440" y1="1677" x2="1440" y2="1715" stroke="#3B6D11" stroke-width="1" marker-end="url(#agr)"/>
+
+<!-- losango parcela paga -->
+<line x1="1440" y1="1865" x2="1440" y2="1903" stroke="#3B6D11" stroke-width="1" marker-end="url(#agr)"/>
+<text x="1452" y="1888" font-size="11" font-weight="500" fill="#3B6D11">Total</text>
+
+<!-- parcialmente pago: seta para baixo -->
+<line x1="1515" y1="1790" x2="1570" y2="1790" stroke="#854F0B" stroke-width="1"/>
+<line x1="1570" y1="1790" x2="1570" y2="1940" stroke="#854F0B" stroke-width="1"/>
+<line x1="1570" y1="1940" x2="1520" y2="1940" stroke="#854F0B" stroke-width="1" marker-end="url(#aa)"/>
+<text x="1578" y="1868" font-size="11" font-weight="500" fill="#854F0B">Parcial</text>
+
+<!-- não pago: ciclo -->
+<line x1="1365" y1="1790" x2="800" y2="1790" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<line x1="800" y1="1790" x2="800" y2="1715" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#ag)"/>
+<text x="1082" y="1782" font-size="11" fill="#888780" text-anchor="middle">Não · próxima parcela</text>
+
+<!-- inadimplência -->
+<line x1="1365" y1="1790" x2="280" y2="1790" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<line x1="280" y1="1790" x2="280" y2="1828" stroke="#E24B4A" stroke-width="1" marker-end="url(#ar)"/>
+
+<!-- coluna inadimplência esquerda -->
+<line x1="280" y1="1904" x2="280" y2="1942" stroke="#E24B4A" stroke-width="1" marker-end="url(#ar)"/>
+<line x1="280" y1="2018" x2="280" y2="2056" stroke="#854F0B" stroke-width="1" marker-end="url(#aa)"/>
+<line x1="280" y1="2132" x2="280" y2="2170" stroke="#854F0B" stroke-width="1" marker-end="url(#aa)"/>
+
+<!-- cobrança antecipada: cron envia X dias antes -->
+<line x1="1210" y1="1677" x2="1210" y2="1715" stroke="#0F6E56" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="1210" y1="1715" x2="1080" y2="1668" stroke="#0F6E56" stroke-width="0.5" stroke-dasharray="3 3" marker-end="url(#agr)"/>
+<text x="1148" y="1686" font-size="10" fill="#0F6E56" text-anchor="middle">D-10 (configurável)</text>
+
+<!-- reparcelamento volta ao ciclo -->
+<line x1="380" y1="2196" x2="800" y2="2196" stroke="#854F0B" stroke-width="0.5" stroke-dasharray="4 3"/>
+<line x1="800" y1="2196" x2="800" y2="1715" stroke="#854F0B" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#aa)"/>
+<text x="590" y="2188" font-size="11" fill="#854F0B" text-anchor="middle">↻ volta ao ciclo de parcelas</text>
+
+<!-- parcialmente pago -->
+<line x1="1440" y1="1978" x2="1440" y2="2016" stroke="#854F0B" stroke-width="1" marker-end="url(#aa)"/>
+
+<!-- quitado -->
+<line x1="1440" y1="1979" x2="1440" y2="2017" stroke="#3B6D11" stroke-width="1" marker-end="url(#agr)"/>
+</svg>
+
+<!-- NÓOS -->
+
+<div class="node w160 pill gray" style="left:720px;top:40px" data-info="Início do processo. O consultor identifica o cliente e abre o fluxo de cadastro no SIAFI."><span class="nt">Início</span></div>
+
+<div class="node w240 purple" style="left:680px;top:118px" data-info="O consultor coleta nome, CPF, RG, data de nascimento, WhatsApp e comprovante de renda."><span class="nt">Consultor coleta dados</span><span class="ns">Nome, CPF, RG, comprovante renda</span></div>
+
+<div class="node w240 purple" style="left:680px;top:232px" data-info="Documentos enviados ao Supabase Storage no bucket client-documents (privado). Paths salvos em fotoPath, rgPath, comprovantePath."><span class="nt">Upload de documentos</span><span class="ns">Bucket client-documents</span></div>
+
+<div class="node w240 purple" style="left:680px;top:346px" data-info="Cliente salvo em clients com consultorId preenchido automaticamente. Consultor não pode alterar este vínculo depois."><span class="nt">Cliente cadastrado</span><span class="ns">consultorId vinculado automaticamente</span></div>
+
+<div class="node w240 purple" style="left:680px;top:460px" data-info="Consultor registra valor solicitado, número de parcelas e finalidade. Status inicial: aguardando."><span class="nt">Consultor registra intenção</span><span class="ns">Valor, parcelas, finalidade</span></div>
+
+<div class="node w240 amber" style="left:680px;top:574px" data-info="SLA de 24h iniciado (configurável). Financeiro notificado via BullMQ. Conversa de contexto criada automaticamente."><span class="nt">SLA iniciado · financeiro notificado</span><span class="ns">Conversa de contexto criada</span></div>
+
+<div class="node w240 gray" style="left:680px;top:710px" data-info="Financeiro analisa score de risco interno (pontualidade, reparcelamentos, quitações), documentos e valor solicitado."><span class="nt">Financeiro analisa intenção</span><span class="ns">Score de risco · docs · valor</span></div>
+
+<div class="diamond" style="left:725px;top:840px" data-info="O financeiro aprova ou rejeita. Rejeição exige motivo obrigatório: score baixo, documentação incompleta, limite atingido, renda insuficiente ou outro.">
+  <div class="ds"></div><div class="dl">Aprovado?</div>
+</div>
+
+<!-- REJEIÇÃO -->
+<div class="node w200 red" style="left:60px;top:887px" data-info="Intenção rejeitada. Motivo registrado. Consultor notificado via BullMQ."><span class="nt">Intenção rejeitada</span><span class="ns">Motivo obrigatório · consultor avisado</span></div>
+<div class="node w200 red" style="left:60px;top:1001px" data-info="Consultor informa o cliente. Canal (sistema, WhatsApp, presencial) e timestamp registrados."><span class="nt">Consultor informa cliente</span><span class="ns">Canal registrado no sistema</span></div>
+<div class="node w180 pill gray" style="left:70px;top:1115px" data-info="Fim. Cliente pode solicitar nova intenção após resolver as pendências."><span class="nt">Fim · nova intenção possível</span></div>
+
+<!-- APROVAÇÃO: contrato aguardando aceite -->
+<div class="node w240 green" style="left:1320px;top:887px" data-info="Contrato gerado com status aguardando_aceite. Split de parcela calculado com decimal.js. AuditLog snapshot imutável. aceiteExpiraEm = hoje + sla_aceite_dias.">
+  <span class="nt">Contrato gerado</span><span class="ns">Status: aguardando_aceite · split calculado</span>
+</div>
+<span class="tag tag-new" style="left:1440px;top:870px">NOVO</span>
+
+<div class="node w240 blue" style="left:1320px;top:1001px" data-info="Portal do cliente ativado automaticamente: conta no Supabase Auth, senha temporária via crypto.randomBytes, WhatsApp e email enviados."><span class="nt">Portal ativado · cliente notificado</span><span class="ns">Supabase Auth · senha temporária</span></div>
+
+<!-- SLA ACEITE -->
+<div class="diamond" style="left:1365px;top:1111px" data-info="O cliente tem 7 dias (padrão configurável) para assinar digitalmente. D-2: alerta ao cliente. D-1: alerta ao consultor. D+0: cancelamento automático via cron.">
+  <div class="ds" style="background:#E6F1FB;border-color:#185FA5"></div>
+  <div class="dl" style="color:#0C447C">Cliente assinou<br>no prazo?</div>
+</div>
+<span class="tag tag-new" style="left:1520px;top:1108px">NOVO</span>
+
+<!-- EXPIRAÇÃO -->
+<div class="node w200 coral" style="left:1000px;top:1158px" data-info="Proposta expirada: contrato cancelado, parcelas canceladas, IntencaoEmprestimo volta para status aprovado (pode ser reaprovada). Portal do cliente mantido ativo."><span class="nt">Proposta expirada</span><span class="ns">Loan cancelado · intenção revertida</span></div>
+<span class="tag tag-new" style="left:1110px;top:1142px">NOVO</span>
+
+<div class="node w200 coral" style="left:1000px;top:1260px" data-info="Consultor é notificado da expiração. O ciclo pode ser reiniciado: financeiro reanalisa a intenção que voltou ao status aprovado."><span class="nt">Consultor notificado</span><span class="ns">Pode reiniciar o processo</span></div>
+
+<!-- ACEITE DIGITAL -->
+<div class="node w240 green" style="left:1320px;top:1299px" data-info="Cliente entra no portal e aceita as condições. Registrado com timestamp, IP e hash SHA-256. Loan.status → aguardando_liberacao (não ativo ainda)."><span class="nt">Aceite digital no portal</span><span class="ns">Timestamp + IP + hash SHA-256</span></div>
+
+<!-- AGUARDANDO LIBERAÇÃO -->
+<div class="node w240 blue" style="left:1320px;top:1413px" data-info="Operador (caixa ou financeiro) vê a pendência no painel 'Liberações pendentes'. Separa o dinheiro (espécie, PIX ou TED) e confirma no sistema selecionando o método."><span class="nt">Operador confirma entrega</span><span class="ns">Status: aguardando_liberacao · caixa age</span></div>
+<span class="tag tag-new" style="left:1480px;top:1396px">NOVO</span>
+
+<div class="diamond" style="left:1365px;top:1488px" data-info="Operador clica em Confirmar Liberação no painel, seleciona o método (dinheiro, PIX ou TED) e confirma a data de entrega.">
+  <div class="ds" style="background:#E6F1FB;border-color:#185FA5"></div>
+  <div class="dl" style="color:#0C447C">Capital<br>entregue?</div>
+</div>
+<span class="tag tag-new" style="left:1520px;top:1486px">NOVO</span>
+
+<!-- ATIVAR CONTRATO -->
+<div class="node w240 green" style="left:1320px;top:1601px" data-info="Sistema: Loan.status = ativo, Transaction de saída no caixa registrada, dataInicio das parcelas = data de liberação informada pelo operador, primeira parcela vence em dataInicio + 1 mês."><span class="nt">Contrato ativado</span><span class="ns">Saída no caixa · parcelas com data real</span></div>
+<span class="tag tag-new" style="left:1480px;top:1584px">NOVO</span>
+
+<!-- PARCELAS -->
+<div class="node w240 teal" style="left:1320px;top:1715px" data-info="Parcelas com datas definidas a partir da entrega real do capital. Dia fixo configurável por contrato (ex: sempre dia 10). Cada parcela tem principal_payback e net_gain calculados com decimal.js."><span class="nt">Parcelas geradas com dia fixo</span><span class="ns">diaVencimento configurável por contrato</span></div>
+
+<div class="node w240 teal" style="left:1320px;top:1715px;top:1640px;left:960px;width:260px" data-info="X dias antes do vencimento (configurável por contrato, padrão 10 dias): sistema gera PDF do boleto/PIX e envia pelos canais habilitados no contrato."><span class="nt">Cobrança antecipada enviada</span><span class="ns">WhatsApp · e-mail c/ PDF · portal download</span></div>
+<span class="tag tag-new" style="left:1110px;top:1624px">NOVO</span>
+
+<div class="diamond" style="left:1365px;top:1715px;top:1790px" data-info="Na data de vencimento: pago total, pago parcial, ou não pago.">
+  <div class="ds"></div><div class="dl">Parcela<br>foi paga?</div>
+</div>
+
+<!-- PAGO TOTAL -->
+<div class="node w240 green" style="left:1320px;top:1903px" data-info="Pagamento total registrado. Split no caixa: principal_payback + net_gain. Se todas pagas: Loan.status = quitado, score do cliente sobe."><span class="nt">Pagamento total confirmado</span><span class="ns">Split no caixa · score sobe se quitado</span></div>
+
+<!-- PARCIALMENTE PAGO -->
+<div class="node w200 amber" style="left:1370px;top:1940px" data-info="NOVO: saldo devedor = valor - totalPago. Mora diária incide sobre saldo devedor a partir do vencimento. Badge 'Parcialmente pago' na interface."><span class="nt">Parcialmente pago</span><span class="ns">Mora sobre saldo devedor</span></div>
+<span class="tag tag-new" style="left:1490px;top:1924px">NOVO</span>
+
+<!-- INADIMPLÊNCIA -->
+<div class="node w200 red" style="left:180px;top:1828px" data-info="Cron 08h marca como atrasado. Score de pontualidade cai. Mora diária calculada sobre saldo devedor."><span class="nt">Parcela em atraso</span><span class="ns">Cron 08h · mora acumulada</span></div>
+
+<div class="node w200 red" style="left:180px;top:1942px" data-info="Cliente acessa o portal e solicita reparcelamento ou boleto atualizado com mora calculada. Informa data prevista de pagamento."><span class="nt">Cliente solicita</span><span class="ns">Reparcelamento ou boleto</span></div>
+
+<div class="node w200 amber" style="left:180px;top:2056px" data-info="Financeiro usa simulador com multa e mora automáticas. Define novo principal, lucro alvo, parcelas e data de início."><span class="nt">Financeiro define termos</span><span class="ns">Simulador · multa · mora</span></div>
+
+<div class="node w200 amber" style="left:180px;top:2170px" data-info="Em $transaction: contrato original cancelado, parcelas pendentes canceladas, novo Loan criado com origemLoanId. status = aguardando_aceite."><span class="nt">Novo contrato gerado</span><span class="ns">origemLoanId · aguardando aceite</span></div>
+
+<!-- INFO BOX pagamentos -->
+<div class="info-box" style="left:960px;top:1715px;width:220px">
+  <strong>Meios de pagamento</strong>
+  PIX · Boleto · Dinheiro · Cartão<br>
+  Webhook MP · baixa automática<br>
+  Saldo devedor atualizado
+</div>
+
+<!-- INFO BOX liberação -->
+<div class="info-box" style="left:960px;top:1413px;width:240px">
+  <strong>Liberação de capital</strong>
+  Dinheiro em espécie · PIX · TED<br>
+  Operador seleciona método no painel<br>
+  Saída no caixa somente após confirmação
+</div>
+
+</div></div>
+
+<div id="tip" class="tooltip"></div>
+<script>
+const tip=document.getElementById('tip');let t;
+document.querySelectorAll('.node,.diamond').forEach(el=>{
+  el.addEventListener('click',()=>{
+    const info=el.getAttribute('data-info');
+    if(!info)return;
+    tip.textContent=info;
+    tip.classList.add('show');
+    clearTimeout(t);
+    t=setTimeout(()=>tip.classList.remove('show'),6000);
+  });
+});
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.node')&&!e.target.closest('.diamond'))
+    tip.classList.remove('show');
+});
+</script>
+</body>
+</html>

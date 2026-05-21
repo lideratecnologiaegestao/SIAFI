@@ -13,3 +13,19 @@ export const JOB_EMAIL_PORTAL_ATIVADO = 'email.portal-ativado';
 // Job names — payment-processing
 export const JOB_PAYMENT_WEBHOOK = 'payment.webhook';
 export const JOB_PAYMENT_CONCILIACAO = 'payment.conciliacao';
+
+// Job names — intencao
+export const JOB_INTENCAO_NOVA      = 'intencao.nova';
+export const JOB_INTENCAO_APROVADA  = 'intencao.aprovada';
+export const JOB_INTENCAO_REJEITADA = 'intencao.rejeitada';
+export const JOB_INTENCAO_SLA_ALERTA   = 'intencao.sla-alerta';
+export const JOB_INTENCAO_SLA_ESCALADA = 'intencao.sla-escalada';
+
+// Job names — proposta / liberação
+export const JOB_PROPOSTA_EXPIRANDO_CLIENTE  = 'proposta.expirando-cliente';
+export const JOB_PROPOSTA_EXPIRADA_CONSULTOR = 'proposta.expirada-consultor';
+export const JOB_CAPITAL_LIBERADO            = 'proposta.capital-liberado';
+
+// Job names — cobrança antecipada
+export const JOB_WA_COBRANCA_ANTECIPADA     = 'whatsapp.cobranca-antecipada';
+export const JOB_EMAIL_COBRANCA_ANTECIPADA  = 'email.cobranca-antecipada';

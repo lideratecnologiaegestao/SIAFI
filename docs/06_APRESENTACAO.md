@@ -5,395 +5,225 @@
 
 ---
 
-&nbsp;
+## O Problema
 
-# Uma Plataforma. Toda a Operação.
-
-O **SIAFI** centraliza o controle completo da carteira de crédito da Lidera — do cadastro do cliente ao recebimento final — em uma interface moderna, rápida e segura.
-
-&nbsp;
-
----
-
-&nbsp;
-
-## O Problema que Resolvemos
-
-Antes do SIAFI, a operação dependia de:
-
-```
-❌  Planilhas manuais sujeitas a erros
-❌  Sem visibilidade em tempo real da carteira
-❌  Controle de inadimplência reativo (não proativo)
-❌  Sem rastreamento de quem fez o quê
-❌  Pagamentos registrados manualmente sem validação
-❌  Dificuldade em gerar relatórios gerenciais
-```
+A Lidera operava com:
+- Planilhas Excel fragmentadas por operador
+- Sem visibilidade em tempo real de inadimplência
+- Cálculos de juros e mora feitos manualmente (erros frequentes)
+- Sem rastreabilidade de ações (quem fez o quê, quando)
+- Clientes sem canal de consulta próprio
+- Notificações manuais por WhatsApp
 
 ---
 
 ## A Solução
 
-```
-✅  Dashboard com visão em tempo real da carteira (atualização automática)
-✅  Cadastro completo de clientes com documentos na nuvem
-✅  Empréstimos com geração automática de parcelas
-✅  Controle de inadimplência com lista de clientes em atraso
-✅  Registro de pagamentos com auditoria completa
-✅  Relatórios gerenciais com indicadores estratégicos
-✅  Integração PIX (QR Code via Mercado Pago)
-✅  Autenticação segura com MFA (dois fatores)
-✅  Segurança com perfis de acesso por função
-```
+**SIAFI 2.0** — plataforma web completa para gestão de crédito pessoal.
+
+| Métrica | Valor |
+|---------|-------|
+| Módulos funcionais | 24 |
+| Páginas no sistema | 35+ |
+| Perfis de acesso | 5 (admin, financeiro, caixa, consultor, cliente) |
+| Jobs agendados | 10 crons diários |
+| Filas assíncronas | 2 (notificações + pagamentos) |
+| Modelos de dados | 24 tabelas |
+| Cobertura | Contratos · Parcelas · Pagamentos · Caixa · Relatórios · Portal |
 
 ---
 
-&nbsp;
+## Diferenciais Competitivos
 
-# Números do Sistema
+### 🔐 Segurança em Camadas
+- Autenticação Supabase GoTrue (padrão bancário)
+- MFA obrigatório configurável (TOTP)
+- JWT de curta duração (15min) com refresh automático
+- Row Level Security — clientes só veem dados próprios
+- Audit log completo de todas as ações
+- bcrypt rounds=12 para senhas
 
-&nbsp;
+### 💳 Gestão de Contratos Completa
+- Fluxo digital: intenção → aceite → liberação → parcelas → quitação
+- Aceite digital com hash SHA-256
+- SLA de aceite configurável (cliente tem N dias para assinar)
+- Liberação manual de capital com registro no caixa
+- Dia fixo de vencimento (1–28) independente do mês
 
-| Indicador | Valor |
-|-----------|-------|
-| Telas operacionais | **25 páginas** |
-| Módulos de back-end | **16 módulos** |
-| Perfis de acesso | **5 roles** |
-| Operações automatizadas | **3 cron jobs diários** |
-| Filas de processamento | **2 queues BullMQ** |
-| Tecnologias de integração | **PIX · WhatsApp · E-mail · Supabase** |
+### 📊 Score de Risco Interno
+- Pontuação 0–100 calculada automaticamente
+- Componentes: pontualidade (50%), reparcelamentos (30%), quitações (20%)
+- Atualizado após cada pagamento, estorno ou marcação de atraso
 
-&nbsp;
+### 📱 Cobrança Multicanal Automatizada
+- Cobrança antecipada N dias antes do vencimento
+- Canais configuráveis por contrato: WhatsApp, Email, Portal
+- PDF boleto gerado automaticamente e enviado por email
+- Reenvio automático para cobranças não visualizadas
+- Mora diária + multa calculadas com precisão financeira (Decimal.js)
 
----
+### 🔄 Reparcelamento Estruturado
+- Fluxo: solicitação → proposta → 2ª aprovação → execução atômica
+- Simulador inline antes de confirmar
+- Aceite digital do cliente
+- Histórico de reparcelamentos vinculado ao score
 
-&nbsp;
+### 👥 Portal do Cliente
+- Acesso próprio com email e senha
+- Visualização de contratos e parcelas
+- Pagamento via PIX com QR Code
+- Abertura de tickets de suporte
+- Aceite digital de contratos
+- MFA disponível
 
-# Telas do Sistema
-
-&nbsp;
-
-## Dashboard — Visão em Tempo Real
-
-```
-┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
-│  Clientes       │  Empréstimos    │  Clientes       │  Clientes       │
-│    Ativos       │    Ativos       │   Atrasados     │   Quitados      │
-│                 │                 │                 │                 │
-│     [48] ──────►│    [32] ──────► │    [7] ──────►  │     [15]        │
-│   /clientes     │  /emprestimos   │  /inadimplentes │                 │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
-
-┌────────────────────────────┐  ┌────────────────────────────┐
-│  ⚠ Clientes Atrasados   🟢 │  │  ✓ Clientes Quitados       │
-│                            │  │                            │
-│  João Silva    [3 parcelas]│  │  Maria Souza    [Quitado]  │
-│  Ana Costa     [1 parcela] │  │  Pedro Lima     [Quitado]  │
-│  Carlos Pires  [2 parcelas]│  │  Lucia Ferreira [Quitado]  │
-│                            │  │                            │
-│  [Ver todos →]             │  │                            │
-└────────────────────────────┘  └────────────────────────────┘
-                  🟢 = Realtime ativo
-```
-
----
-
-## Gestão de Clientes
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Clientes                                  [+ Novo Cliente] │
-├─────────────────────────────────────────────────────────────┤
-│  🔍 Buscar por nome, CPF/CNPJ ou WhatsApp... [Status ▾]     │
-├──────────────────┬──────────┬──────────┬────────┬───────────┤
-│  Nome            │  CPF/CNPJ│ WhatsApp │ Status │   Ações   │
-├──────────────────┼──────────┼──────────┼────────┼───────────┤
-│  João da Silva   │ 123...   │ 61 9...  │ Ativo  │  👁  ✏    │
-│  Maria Souza     │ 456...   │ 61 8...  │ Ativo  │  👁  ✏    │
-│  Carlos Pires    │ 789...   │ 61 7...  │ Inativo│  👁  ✏    │
-└──────────────────┴──────────┴──────────┴────────┴───────────┘
-```
-
-**Perfil do Cliente inclui:**
-- Dados pessoais · Contato · Endereço
-- Documentos (Foto · RG · Comprovante — armazenados na nuvem)
-- Histórico de **todos os contratos** numerados sequencialmente
-- Acesso direto para novo empréstimo
+### 🤝 Módulo Consultor
+- Carteira própria com visão de clientes
+- Criação de intenções de empréstimo
+- Acompanhamento de cobranças
+- Chat interno com financeiro
+- Solicitações de reparcelamento
 
 ---
 
-## Criação de Empréstimo — Simples e Direto
+## Arquitetura Técnica
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Novo Empréstimo                                        │
-├─────────────────────────────────────────────────────────┤
-│  Cliente          [João da Silva                    ▾]  │
-│  Valor             R$ [    800,00]                       │
-│  Número de parcelas    [  5      ]                       │
-│  Valor da parcela  R$ [    280,00]  ← ENTRADA DIRETA    │
-│  Forma de pagamento  [Débito Cartão                 ▾]   │
-│  Data de início    [  19/05/2026 ]                       │
-├─────────────────────────────────────────────────────────┤
-│  🧮 Simulação                                           │
-│  Capital: R$ 800,00  │  5x de R$ 280,00                │
-│  Total a Pagar: R$ 1.400,00  │  Acréscimo: R$ 600,00   │
-├─────────────────────────────────────────────────────────┤
-│                              [Cancelar] [Criar Empréstimo]│
-└─────────────────────────────────────────────────────────┘
+                    HTTPS (Let's Encrypt)
+                         │
+              ┌──────────▼──────────┐
+              │     Nginx 1.28.0    │
+              │   reverse proxy     │
+              └──────┬──────────┬───┘
+                     │          │
+          ┌──────────▼──┐   ┌───▼──────────────┐
+          │ NestJS :4010│   │ Next.js 16 :4011 │
+          │ 24 módulos  │   │ 35+ páginas       │
+          └──────┬───┬──┘   └──────────────────┘
+                 │   │
+         ┌───────▼┐ ┌▼────────────────────┐
+         │ Redis  │ │   Supabase (SA)     │
+         │ BullMQ │ │ PostgreSQL + Auth   │
+         │Upstash │ │ Storage + Realtime  │
+         └────────┘ └─────────────────────┘
 ```
 
-> Parcelas geradas **automaticamente**. Sem cálculos manuais.
+**Stack completo:**
+
+| Camada | Tecnologia |
+|--------|-----------|
+| Backend | NestJS 10 · TypeScript 5 · Prisma 5 |
+| Frontend | Next.js 16 · Tailwind CSS 4 · shadcn/ui |
+| Banco | PostgreSQL 15 via Supabase (sa-east-1) |
+| Auth | Supabase GoTrue + JWT local |
+| Filas | BullMQ + Redis Upstash |
+| Email | Nodemailer + Hostinger SMTP (porta 465 SSL) |
+| PIX | Mercado Pago API |
+| WhatsApp | Evolution API |
+| Realtime | Supabase Realtime (chat interno) |
+| Deploy | NSSM + Nginx (Windows Server 2022) |
 
 ---
 
-## Controle de Inadimplência
+## Automação Diária
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Inadimplentes                                              │
-├────────────────┬──────────────┬────────────┬────────────────┤
-│  Cliente       │  Empréstimo  │  Saldo Dev.│  Ações         │
-├────────────────┼──────────────┼────────────┼────────────────┤
-│  João Silva    │  Empréstimo  │ R$ 560,00  │ [Renegociar]   │
-│                │  #12         │            │ [Ver]          │
-├────────────────┼──────────────┼────────────┼────────────────┤
-│  Ana Costa     │  Empréstimo  │ R$ 280,00  │ [Renegociar]   │
-│                │  #18         │            │ [Ver]          │
-└────────────────┴──────────────┴────────────┴────────────────┘
-```
-
----
-
-## Relatórios Gerenciais — Carteira
-
-```
-┌──────────────────┬──────────────────┬──────────────────┬──────────────────┐
-│  Valor           │  Valor Total     │  Valor           │  A Receber       │
-│  Investido       │  Parcelado       │  Recebido        │                  │
-│                  │                  │                  │                  │
-│  R$ 28.500,00   │  R$ 41.200,00   │  R$ 18.700,00   │  R$ 22.500,00   │
-└──────────────────┴──────────────────┴──────────────────┴──────────────────┘
-       ↑                  ↑                  ↑                  ↑
-  Capital total      Total bruto        Já recebido       Ainda a receber
-
-┌─────────────────────────────┐  ┌─────────────────────────────┐
-│  Empréstimos Ativos         │  │  Empréstimos em Atraso       │
-│              32             │  │               7              │
-└─────────────────────────────┘  └─────────────────────────────┘
-```
+| Horário | Ação Automática |
+|---------|----------------|
+| 02h00 | Conciliação de PIX pendentes no Mercado Pago |
+| 07h00 | Alerta de SLA de aceite (D-2 cliente, D-1 consultor); cancela vencidos |
+| 08h00 | Marca parcelas vencidas como atrasadas |
+| 08h05 | Aplica multa (1x) + mora diária sobre saldo devedor |
+| 09h00 | Envia lembretes de vencimento (email + WhatsApp) |
+| 09h30 | Gera PDF boleto e envia cobrança antecipada |
+| 10h00 | Notifica inadimplentes |
+| 11h00 | Lembrete de reparcelamentos pendentes |
+| 14h00 | Reenvio de cobranças não visualizadas no portal |
+| */2h | Verificação de SLA de intenções de empréstimo |
 
 ---
 
-&nbsp;
+## Perfis de Acesso Comparativo
 
-# Arquitetura Técnica
-
-&nbsp;
-
-```mermaid
-graph TD
-    User((Usuário)) --> Nginx
-
-    subgraph "Windows Server 2022 — Lidera"
-        Nginx["Nginx 1.28\nSSL/TLS · Gzip · Proxy\nfin.lidera.app.br"]
-
-        Nginx -->|"/* :4011"| Frontend
-        Nginx -->|"/api/* :4010"| Backend
-        Nginx -->|"/admin/queues :4010"| BullBoard
-
-        subgraph "Frontend — Next.js 16 :4011"
-            Frontend["Next.js 16 · App Router\n25 páginas · AuthContext\nuseRealtimeDashboard"]
-            BullBoard["BullBoard\nQueue Monitor"]
-        end
-
-        subgraph "Backend — NestJS 10 :4010 · 16 módulos"
-            Backend["API REST\nJwtAuthGuard · RolesGuard\nValidationPipe · AuditInterceptor"]
-            Workers["BullMQ Workers\nnotif-queue · payment-queue\n(retry 3–5x · backoff exp.)"]
-            Cron["Cron Jobs\n08h marcaAtraso\n09h lembretes · 10h cobranças"]
-        end
-
-        NSSM["NSSM · Windows Services\nSIAFI-API · SIAFI-WEB"]
-        NSSM -.->|"gerencia processos"| Frontend
-        NSSM -.->|"gerencia processos"| Backend
-    end
-
-    Redis[("Redis\nUpstash Cloud\nBullMQ backend")]
-
-    subgraph "Supabase Cloud — sa-east-1"
-        SAuth["Auth / GoTrue\nJWT HS256 · MFA TOTP\nOAuth Google"]
-        SDB[("PostgreSQL\n16 tabelas + RLS\nPrisma ORM")]
-        SStorage[("Storage\nclient-documents\nURLs assinadas 1h")]
-        SRealtime["Realtime\nWebSocket\ninstallments · payments\ntransactions"]
-    end
-
-    MP["Mercado Pago\nQR Code PIX"]
-    WA["Evolution API\nWhatsApp"]
-    Mail["SMTP\nE-mail"]
-
-    Frontend -->|"REST + Bearer JWT Supabase"| Nginx
-    Frontend -.->|"sessão · MFA · OAuth"| SAuth
-    Frontend -.->|"eventos ao vivo"| SRealtime
-
-    Backend -->|"Prisma ORM"| SDB
-    Backend -->|"service_role key\ncreateUser · syncRole · signOut"| SAuth
-    Backend -->|"uploadFile()\ncreateSignedUrl()"| SStorage
-
-    Backend -->|"enfileira jobs"| Redis
-    Redis -->|"dequeue"| Workers
-    Workers -->|"cobranças / lembretes"| WA
-    Workers -->|"notificações"| Mail
-    Cron -->|"enfileira"| Redis
-
-    Backend -->|"criar QR Code PIX"| MP
-    MP -.->|"POST /api/webhook/mp\nconfirmação pagamento"| Nginx
-```
-
-### Stack Tecnológico
-
-| Camada | Tecnologia | Por quê |
-|--------|-----------|---------|
-| **Backend** | NestJS 10 + TypeScript | Estrutura modular, tipagem forte, testável |
-| **Frontend** | Next.js 16 + App Router | Performance, rotas protegidas, SSR |
-| **Banco** | PostgreSQL + Prisma 5 | Confiabilidade + migrations versionadas |
-| **Auth** | Supabase GoTrue (JWT HS256) | MFA TOTP, OAuth Google, sessões gerenciadas |
-| **Storage** | Supabase Storage | Documentos privados na nuvem, URLs assinadas |
-| **Realtime** | Supabase Realtime | Dashboard atualizado automaticamente via WebSocket |
-| **Filas** | BullMQ + Redis (Upstash) | Notificações e pagamentos assíncronos com retry |
-| **Deploy** | NSSM + Windows Server | Ambiente de produção estável |
-| **UI** | Tailwind CSS 4 + shadcn/ui | Interface moderna e responsiva |
+| Funcionalidade | Admin | Financeiro | Caixa | Consultor | Cliente |
+|----------------|-------|-----------|-------|-----------|---------|
+| Dashboard geral | ✅ | ✅ | ✅ | ✅ | — |
+| CRUD Clientes | ✅ | ✅ | ver | ver carteira | — |
+| Contratos | ✅ | ✅ | ver | ver carteira | ver próprios |
+| Pagamentos | ✅ | ✅ | ✅ | — | via PIX |
+| Caixa | ✅ | ✅ | ✅ | — | — |
+| Relatórios | ✅ | ✅ | — | — | — |
+| Reparcelamento | ✅ | ✅ | — | solicitar | — |
+| Intenções | ✅ | ✅ | — | criar | — |
+| Score de risco | ✅ | ✅ | — | ver | — |
+| Chat interno | ✅ | ✅ | ✅ | ✅ | — |
+| Auditoria | ✅ | — | — | — | — |
+| Configurações | ✅ | — | — | — | — |
+| Usuários | ✅ | — | — | — | — |
+| Portal próprio | — | — | — | — | ✅ |
 
 ---
 
-&nbsp;
+## Segurança e Compliance
 
-# Segurança
+### Segurança Técnica
+- ✅ HTTPS com TLS 1.3 obrigatório
+- ✅ MFA disponível para todos os operadores
+- ✅ JWT de curta duração (15min) com refresh automático
+- ✅ Rate limiting (10 req/min no login)
+- ✅ Bloqueio de conta após 5 tentativas falhas
+- ✅ Auditoria completa de todas as ações
+- ✅ Row Level Security no banco de dados
+- ✅ Validação de entrada em todos os endpoints
+- ✅ Senhas hasheadas com bcrypt rounds=12
+- ✅ Secrets nunca expostos no frontend
 
-&nbsp;
-
-```
-🔐  Autenticação via Supabase GoTrue JWT (15 minutos de expiração)
-🔑  MFA TOTP obrigatório para perfis Administrador e Financeiro
-🔄  Refresh Token automático e silencioso (7 dias, httpOnly cookie)
-👤  5 perfis de acesso com permissões granulares
-🛡️  Row Level Security (RLS) em todas as 16 tabelas do banco
-📋  Auditoria completa de todas as ações do sistema
-🔒  HTTPS com SSL Let's Encrypt em produção
-🗄️  Documentos armazenados em bucket privado (Supabase Storage)
-🔗  URLs de documentos assinadas (expiram em 1 hora)
-```
-
----
-
-&nbsp;
-
-# Integrações
-
-&nbsp;
-
-| Integração | Finalidade | Status |
-|-----------|-----------|--------|
-| **Supabase** | PostgreSQL · Auth (MFA/OAuth) · Storage · Realtime | ✅ Ativo |
-| **Redis (Upstash)** | Backend das filas BullMQ · processamento assíncrono | ✅ Ativo |
-| **Mercado Pago** | Geração de QR Code PIX · Webhook de pagamento | Configurável |
-| **Evolution API** | Envio de cobranças e lembretes via WhatsApp | Configurável |
-| **SMTP** | Notificações por e-mail | Configurável |
+### Conformidade LGPD
+- ✅ Dados no Brasil (sa-east-1, São Paulo)
+- ✅ Consentimento para notificações (`notificacoesEmail`)
+- ✅ Soft-delete (inativação) para direito ao esquecimento
+- ✅ Portal do cliente para acesso aos próprios dados
+- ✅ Log de auditoria para rastreabilidade
+- ⚠️ Política de privacidade — pendente publicação
+- ⚠️ DPO formalmente designado — pendente
 
 ---
 
-&nbsp;
+## Roadmap
 
-# Automações (Cron Jobs Diários)
+### Próximas Implementações
+| Prioridade | Feature |
+|-----------|---------|
+| 🔴 Alta | Geração de contratos em PDF com assinatura digital |
+| 🔴 Alta | Política de privacidade e LGPD compliant no portal |
+| 🟡 Média | Dashboard com gráficos (recharts) — evolução mensal, inadimplência |
+| 🟡 Média | Exportação de relatórios em Excel e PDF |
+| 🟡 Média | Notificações push (PWA) |
+| 🟢 Baixa | App mobile (React Native) |
+| 🟢 Baixa | Integração com bureaux de crédito (SPC/Serasa) |
+| 🟢 Baixa | Multa automática (campo existe, aplicação manual) |
 
-&nbsp;
-
-```
-08:00  ─────►  Marca parcelas vencidas como "Em Atraso"
-                ↓
-09:00  ─────►  Envia lembretes de parcelas próximas do vencimento
-                ↓ (via WhatsApp / E-mail)
-10:00  ─────►  Envia cobranças para parcelas em atraso
-```
-
-> Toda a cobrança acontece **automaticamente**, sem intervenção manual.
-
----
-
-&nbsp;
-
-# Perfis de Acesso
-
-&nbsp;
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    PERFIS DE ACESSO                            │
-├──────────────┬──────────┬───────────┬──────────┬───────────────┤
-│    Recurso   │  Admin   │ Financeiro│  Caixa   │   Usuário     │
-├──────────────┼──────────┼───────────┼──────────┼───────────────┤
-│  Dashboard   │    ✅    │    ✅     │    ✅    │      ✅       │
-│  Clientes    │    ✅    │    ✅     │  👁 ler  │      ❌       │
-│  Empréstimos │    ✅    │    ✅     │    ❌    │      ❌       │
-│  Pagamentos  │    ✅    │    ✅     │    ✅    │      ❌       │
-│  Caixa       │    ✅    │    ✅     │    ✅    │      ❌       │
-│  Relatórios  │    ✅    │    ✅     │    ❌    │      ❌       │
-│  Usuários    │    ✅    │    ❌     │    ❌    │      ❌       │
-│  Config.     │    ✅    │    ❌     │    ❌    │      ❌       │
-│  Auditoria   │    ✅    │    ❌     │    ❌    │      ❌       │
-└──────────────┴──────────┴───────────┴──────────┴───────────────┘
-```
+### Configurações Pendentes (Produção)
+- [ ] `MP_ACCESS_TOKEN` — Mercado Pago real (produção)
+- [ ] Evolution API — configurar instância WhatsApp real
+- [ ] RLS Supabase — aplicar políticas via SQL Editor
+- [ ] DPO designado — notificar ANPD
 
 ---
 
-&nbsp;
+## Antes × Depois
 
-# Roadmap — Próximas Entregas
-
-&nbsp;
-
-| Prioridade | Funcionalidade | Descrição |
-|-----------|---------------|-----------|
-| 🔴 Alta | **Multa e Mora por Atraso** | Calcular e exibir valor reajustado para parcelas vencidas |
-| 🟡 Média | **Portal do Cliente** | App web para clientes consultarem contratos e parcelas |
-| 🟡 Média | **Contratos em PDF** | Geração automática de contrato de empréstimo formatado |
-| 🟡 Média | **Gráficos no Dashboard** | Evolução de carteira, inadimplência e recebimentos |
-| 🟢 Baixa | **Exportação Excel/PDF** | Exportar relatórios e listas para planilha ou PDF |
-| 🟢 Baixa | **Templates de E-mail** | Personalizar mensagens de cobrança e lembrete |
-
----
-
-&nbsp;
-
-# Por Que o SIAFI
-
-&nbsp;
-
-```
-Antes                          Depois (SIAFI 2.0)
-──────────────────────────     ──────────────────────────────────
-Planilhas → Erro humano        Registro digital → Zero duplicatas
-Sem histórico de ações         Auditoria completa de cada ação
-Inadimplência descoberta tarde Lista de atrasados em tempo real
-Sem integração PIX             QR Code gerado em 1 clique
-Relatórios manuais             Relatórios automáticos em segundos
-Senha compartilhada            MFA + perfis individuais com rastreio
-Documentos em papel/local      Documentos na nuvem com acesso seguro
-```
+| Situação | Antes | Depois |
+|----------|-------|--------|
+| Controle de contratos | Planilhas Excel | Sistema web em tempo real |
+| Cálculo de juros | Manual (erros) | Automatizado com Decimal.js |
+| Notificações | WhatsApp manual | Automático (email + WA + portal) |
+| Inadimplência | Descoberta tardia | Monitoramento diário às 08h |
+| Rastreabilidade | Zero | Auditoria completa de toda ação |
+| Acesso do cliente | Ligação/WhatsApp | Portal 24/7 com PIX |
+| Reparcelamento | Acordo verbal | Fluxo digital com aceite formal |
+| Score de crédito | Inexistente | Score interno atualizado em tempo real |
+| Segurança | Senha única | MFA + JWT + RLS + bcrypt |
 
 ---
 
-&nbsp;
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  SIAFI 2.0 — Sistema Integrado de Apoio Financeiro
-  Lidera · lideraabrange@gmail.com
-  https://financeiro.lidera.app.br
-
-  Desenvolvido com  NestJS · Next.js · Prisma · Supabase · Tailwind
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-*Versão 2.0 · Maio 2026*
+*SIAFI 2.0 — Desenvolvido com NestJS + Next.js · Infraestrutura Supabase + Redis · Deploy Windows Server 2022*
+*Versão 2.0 · Maio 2026 · Lidera Tecnologia e Gestão*

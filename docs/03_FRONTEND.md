@@ -1,206 +1,141 @@
 # SIAFI 2.0 — Guia do Frontend (Next.js)
 
+> Última atualização: 2026-05-22 | Next.js 16 · TypeScript 5 · Tailwind CSS 4
+
+---
+
 ## Estrutura de Diretórios
 
 ```
 frontend/src/
 ├── app/
-│   ├── layout.tsx                  ← Root layout (providers)
-│   ├── page.tsx                    ← Redirect → /dashboard
 │   ├── (auth)/
-│   │   ├── login/page.tsx          ← Página de login (suporta MFA)
-│   │   ├── mfa-challenge/page.tsx  ← Verificação de código TOTP
-│   │   └── mfa-setup/page.tsx      ← Configuração inicial de MFA
-│   ├── auth/
-│   │   └── callback/route.ts       ← Route Handler OAuth Google callback
-│   └── (dashboard)/
-│       ├── layout.tsx              ← Layout com sidebar + topbar + route-role guard
-│       ├── dashboard/page.tsx      ← KPIs + Realtime + Clientes Atrasados/Quitados
-│       ├── clientes/
-│       │   ├── page.tsx            ← Lista com busca e paginação
-│       │   ├── novo/page.tsx       ← Formulário com CPF/CNPJ mask + upload docs
-│       │   └── [id]/
-│       │       ├── page.tsx        ← Detalhe + contratos + card Documentos (URLs assinadas)
-│       │       └── editar/page.tsx ← Edição com pré-preenchimento + CPF/CNPJ mask
-│       ├── emprestimos/
-│       │   ├── page.tsx
-│       │   ├── novo/page.tsx
-│       │   └── [id]/page.tsx
-│       ├── parcelas/page.tsx
-│       ├── pagamentos/
-│       │   ├── page.tsx
-│       │   └── novo/page.tsx
-│       ├── inadimplentes/page.tsx
-│       ├── caixa/page.tsx
-│       ├── renegociacoes/
-│       │   ├── page.tsx
-│       │   └── nova/page.tsx
-│       ├── pix/page.tsx
-│       ├── conciliacao/page.tsx
-│       ├── relatorios/page.tsx
-│       ├── notificacoes/page.tsx
-│       ├── suporte/page.tsx
-│       ├── usuarios/
-│       │   ├── page.tsx
-│       │   ├── novo/page.tsx
-│       │   └── [id]/editar/page.tsx
-│       ├── configuracoes/page.tsx
-│       └── auditoria/page.tsx
+│   │   ├── login/page.tsx           → Login username+senha / Google
+│   │   └── mfa-setup/page.tsx       → Configuração MFA TOTP
+│   ├── (dashboard)/                 → Layout com sidebar (operadores internos)
+│   │   ├── layout.tsx               → Sidebar + Topbar + AuthGuard
+│   │   ├── dashboard/page.tsx       → KPIs + listas resumidas
+│   │   ├── clientes/
+│   │   │   ├── page.tsx             → Lista + busca + vincular consultor
+│   │   │   ├── novo/page.tsx        → Formulário com docs + consultor
+│   │   │   └── [id]/
+│   │   │       ├── page.tsx         → Detalhe + contratos + score + portal
+│   │   │       └── editar/page.tsx  → Edição completa
+│   │   ├── emprestimos/
+│   │   │   ├── page.tsx             → Lista + filtros + somas por status
+│   │   │   ├── novo/page.tsx        → Criação + config. cobrança + simulador
+│   │   │   └── [id]/page.tsx        → Detalhe + parcelas + cobranças (tabs)
+│   │   ├── parcelas/page.tsx        → Parcelas em atraso
+│   │   ├── pagamentos/
+│   │   │   ├── page.tsx             → Histórico + estorno
+│   │   │   └── novo/page.tsx        → cliente → loan → parcela → pagar
+│   │   ├── inadimplentes/page.tsx   → Carteira inadimplente
+│   │   ├── caixa/page.tsx           → Saldo + transações + lançamento
+│   │   ├── renegociacoes/
+│   │   │   ├── page.tsx
+│   │   │   └── nova/page.tsx
+│   │   ├── reparcelamentos/
+│   │   │   ├── page.tsx             → Lista + proposta + aprovação + execução
+│   │   │   └── nova/page.tsx        → Formulário + simulador inline
+│   │   ├── intencoes/page.tsx       → Intenções com SLA + score
+│   │   ├── solicitacoes/page.tsx    → Solicitações do consultor
+│   │   ├── cobrancas/page.tsx       → Cobranças da carteira (consultor)
+│   │   ├── consultor/
+│   │   │   └── carteira/
+│   │   │       ├── page.tsx         → Visão da carteira
+│   │   │       └── [clientId]/page.tsx → Detalhe do cliente (consultor)
+│   │   ├── pix/page.tsx             → Gerador QR Code PIX
+│   │   ├── conciliacao/page.tsx     → Conciliação bancária mensal
+│   │   ├── relatorios/page.tsx      → 5 abas: carteira, clientes, movim., contratos, faturamento
+│   │   ├── mensagens/page.tsx       → Chat interno + Supabase Realtime
+│   │   ├── notificacoes/page.tsx    → Log de notificações
+│   │   ├── suporte/page.tsx         → Tickets de suporte
+│   │   ├── usuarios/
+│   │   │   ├── page.tsx
+│   │   │   ├── novo/page.tsx
+│   │   │   └── [id]/editar/page.tsx
+│   │   ├── configuracoes/page.tsx   → Parâmetros admin
+│   │   └── auditoria/page.tsx       → Log de auditoria com detalhes expandíveis
+│   ├── portal/                      → Portal do cliente (role=cliente)
+│   │   ├── layout.tsx
+│   │   ├── home/page.tsx
+│   │   ├── contratos/page.tsx
+│   │   ├── pagamentos/page.tsx      → PIX via QR Code
+│   │   ├── suporte/page.tsx
+│   │   └── perfil/page.tsx
+│   └── auth/callback/route.ts       → Callback Google OAuth
 ├── components/
 │   ├── layout/
-│   │   ├── sidebar.tsx             ← Menu lateral com roles
-│   │   └── topbar.tsx              ← Barra superior
-│   └── ui/
-│       ├── button.tsx · card.tsx · input.tsx · label.tsx
-│       ├── badge.tsx · skeleton.tsx
-│       ├── select.tsx              ← select nativo estilizado
-│       └── textarea.tsx
+│   │   ├── sidebar.tsx              → Menu lateral com badges e grupos por role
+│   │   └── topbar.tsx               → Header com usuário e logout
+│   ├── portal/
+│   │   └── portal-card.tsx          → Card de status do portal (em /clientes/[id])
+│   └── ui/                          → button, input, card, badge, skeleton, select, textarea, label
 ├── contexts/
-│   └── auth.context.tsx            ← AccessToken em memória (Supabase JWT)
+│   └── auth.context.tsx             → AuthProvider + useAuth() + AuthUser
+├── hooks/
+│   └── useUnreadCount.ts            → Badge de mensagens não-lidas
 └── lib/
-    ├── api.ts                      ← Axios + refresh automático (Supabase)
-    ├── supabase/
-    │   └── mfa.ts                  ← Helpers de API diretos para MFA (challenge/verify)
-    └── utils.ts                    ← Formatação + constantes
+    ├── api.ts                       → Axios instance + interceptor refresh JWT
+    ├── utils.ts                     → formatCurrency, formatDate, formatCPF, etc.
+    └── supabase/client.ts           → Supabase browser client (Realtime)
 ```
 
 ---
 
-## Autenticação no Frontend
-
-### AuthContext
+## AuthContext e Proteção de Rotas
 
 ```typescript
-const AuthContext = {
-  user: { id: number; nome: string; role: UserRole } | null,
-  accessToken: string | null,    // JWT Supabase em memória
-  isAuthenticated: boolean,
-  isLoading: boolean,
-  login(username, password): Promise<{ needsMfa?: boolean }>,
-  completeMfa(factorId, code): Promise<void>,  // eleva AAL para aal2
-  logout(): Promise<void>,
+// contexts/auth.context.tsx
+export interface AuthUser {
+  id: number
+  username: string
+  nome: string
+  role: 'admin' | 'financeiro' | 'consultor' | 'caixa' | 'cliente'
 }
 
-type UserRole = 'admin' | 'financeiro' | 'caixa' | 'usuario' | 'cliente'
+export function useAuth() {
+  return useContext(AuthContext) // { user, isLoading, isAuthenticated, login, logout }
+}
+
+// layout.tsx do dashboard — proteção automática
+'use client'
+const { user, isLoading } = useAuth()
+if (!isLoading && !user) redirect('/login')
+if (user?.role === 'cliente') redirect('/portal/home')
 ```
 
-### Refresh Automático de Token
+### Verificação de Role nos Componentes
 
-Em `lib/api.ts`, o interceptor de response:
-1. Detecta 401
-2. Faz `POST /api/auth/refresh` (cookie httpOnly Supabase enviado automaticamente)
-3. Supabase emite novo access_token via `refreshSession()`
-4. Atualiza accessToken em memória
-5. Re-tenta a requisição original
-6. Fila de requisições concorrentes para evitar múltiplos refreshes simultâneos
+```typescript
+const { user } = useAuth()
+const canManage = user?.role === 'admin' || user?.role === 'financeiro'
+const isConsultor = user?.role === 'consultor'
+
+// Renderização condicional
+{canManage && <Button onClick={handleVincular}>Vincular Consultor</Button>}
+```
 
 ---
 
-## Route-Role Guard (Dashboard Layout)
-
-O layout `(dashboard)/layout.tsx` protege rotas por role no cliente:
+## Interceptor de Refresh JWT
 
 ```typescript
-const ROUTE_ROLES: Array<{ prefix: string; roles: UserRole[] }> = [
-  { prefix: '/usuarios',     roles: ['admin'] },
-  { prefix: '/configuracoes',roles: ['admin'] },
-  { prefix: '/auditoria',    roles: ['admin'] },
-  { prefix: '/emprestimos',  roles: ['admin', 'financeiro'] },
-  { prefix: '/relatorios',   roles: ['admin', 'financeiro'] },
-  { prefix: '/renegociacoes',roles: ['admin', 'financeiro'] },
-  { prefix: '/pix',          roles: ['admin', 'financeiro'] },
-  { prefix: '/conciliacao',  roles: ['admin', 'financeiro'] },
-  { prefix: '/inadimplentes',roles: ['admin', 'financeiro'] },
-  { prefix: '/notificacoes', roles: ['admin', 'financeiro'] },
-]
-```
-
-Rotas não listadas são acessíveis por todos os roles autenticados.
-Redirecionamento para `/dashboard` se o role não tem permissão.
-
-> **Importante:** `usePathname()` retorna `null` durante a hidratação Next.js.
-> O guard usa `pathname &&` antes de chamar `isAllowed()` para evitar crash.
-
----
-
-## CPF/CNPJ Mask — Padrão Controller
-
-Campos CPF/CNPJ usam `Controller` do react-hook-form (não `register`) para máscara ao vivo:
-
-```typescript
-function formatCpfCnpj(raw: string): string {
-  const d = raw.replace(/\D/g, '').slice(0, 14)
-  if (d.length <= 11) {
-    return d
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
+// lib/api.ts — interceptor automático de 401
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    if (error.response?.status === 401 && !error.config._retry) {
+      error.config._retry = true
+      const { data } = await axios.post('/api/auth/refresh', { refreshToken })
+      tokenStore.set(data.accessToken)
+      error.config.headers.Authorization = `Bearer ${data.accessToken}`
+      return api(error.config)
+    }
+    return Promise.reject(error)
   }
-  return d
-    .replace(/(\d{2})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1/$2')
-    .replace(/(\d{4})(\d{1,2})$/, '$1-$2')
-}
-
-// No JSX:
-<Controller
-  name="cpf"
-  control={control}
-  render={({ field }) => (
-    <Input
-      value={formatCpfCnpj(field.value ?? '')}
-      onChange={(e) => field.onChange(formatCpfCnpj(e.target.value))}
-      onBlur={field.onBlur}
-      placeholder="000.000.000-00 ou 00.000.000/0000-00"
-      maxLength={18}
-    />
-  )}
-/>
+)
 ```
-
-A máscara alterna automaticamente entre formato CPF (≤11 dígitos) e CNPJ (12–14 dígitos).
-
----
-
-## Formulário com Validação — Padrão
-
-```typescript
-const schema = z.object({
-  nome: z.string().min(3),
-  valor: z.coerce.number().min(0.01),
-})
-type FormData = z.infer<typeof schema>
-
-const { register, handleSubmit, control, formState: { errors } } = useForm<FormData>({
-  resolver: zodResolver(schema) as any,  // "as any" — Zod v4 incompatível com react-hook-form types
-})
-
-const mutation = useMutation({
-  mutationFn: (data: FormData) => api.post('/entidades', data),
-  onSuccess: () => {
-    qc.invalidateQueries({ queryKey: ['entidades'] })
-    router.push('/entidades')
-  },
-})
-```
-
-### FormData com Uploads (multipart)
-
-```typescript
-mutationFn: (data: FormData) => {
-  const fd = new window.FormData()
-  // Pular campos vazios — @IsOptional() não aceita string vazia no backend
-  Object.entries(data).forEach(([k, v]) => {
-    if (v !== undefined && v !== '') fd.append(k, String(v))
-  })
-  if (foto) fd.append('foto', foto)
-  return api.post('/clients', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-}
-```
-
-> **Atenção:** Campos opcionais (`dataNascimento`, `email`, `estado`) devem ser omitidos
-> do FormData quando vazios. O backend rejeita `""` com erro de validação.
 
 ---
 
@@ -208,110 +143,173 @@ mutationFn: (data: FormData) => {
 
 ```typescript
 'use client'
+const { data, isLoading, isError, refetch } = useQuery({
+  queryKey: ['entidade', { search, status, page }],
+  queryFn: () => api.get('/endpoint', { params: { search, status, page, limit: 20 } })
+    .then(r => r.data),
+})
 
-export default function EntidadesPage() {
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['entidades', { search, page }],
-    queryFn: () => api.get('/entidades', {
-      params: { search: search || undefined, page, limit: 20 }
-    }).then(r => r.data),
-  })
-  // data = { data: [], total: N, page: N, lastPage: N }
-}
+const mutation = useMutation({
+  mutationFn: (id: number) => api.delete(`/endpoint/${id}`),
+  onSuccess: () => qc.invalidateQueries({ queryKey: ['entidade'] }),
+})
 ```
 
 ---
 
-## Dashboard — Realtime
-
-O dashboard usa `useRealtimeDashboard()` para receber atualizações ao vivo:
+## Padrão de Formulário
 
 ```typescript
-// Hook subscreve Supabase Realtime em installments, payments, transactions
-// Ao receber evento → invalida queries ['clients', 'stats'] e ['loans', 'stats']
-// Indicador visual: ponto verde pulsante no canto do dashboard
+const schema = z.object({
+  nome: z.string().min(3),
+  consultorId: z.string().optional(),      // select → string no form, number na API
+  multaPercentual: z.number().min(0).max(1),
+})
+
+const { register, handleSubmit, control } = useForm<FormData>({
+  resolver: zodResolver(schema) as any,    // cast necessário Zod v4 + react-hook-form
+})
+
+// Campos com máscara (CPF, moeda): usar <Controller>
+<Controller
+  name="cpf"
+  control={control}
+  render={({ field }) => (
+    <Input
+      value={formatCpfCnpj(field.value ?? '')}
+      onChange={(e) => field.onChange(formatCpfCnpj(e.target.value))}
+    />
+  )}
+/>
 ```
 
 ---
 
-## Utilitários (lib/utils.ts)
+## Realtime (Chat Interno)
 
 ```typescript
-formatCurrency(value)       // R$ 1.234,56
-formatDate(date)            // 19/05/2026
-formatDateTime(date)        // 19/05/2026, 14:30
-formatCPF(cpf)              // 000.000.000-00
-formatPhone(phone)          // (00) 00000-0000
-formatCEP(cep)              // 00000-000
+// hooks/useUnreadCount.ts — polling 30s + Supabase Realtime
+import { getSupabaseBrowserClient } from '@/lib/supabase/client'
 
-STATUS_LOAN         → { ativo, quitado, inadimplente, cancelado }
-STATUS_INSTALLMENT  → { pendente, pago, atrasado, cancelado }
-METODO_PAGAMENTO    → { dinheiro, pix, cartao, transferencia, cheque, mercadopago }
+const supabase = getSupabaseBrowserClient()
+supabase
+  .channel('mensagens-inseridas')
+  .on(
+    'postgres_changes' as any,  // cast necessário (tipagem Supabase)
+    { event: 'INSERT', schema: 'public', table: 'mensagens' },
+    () => qc.invalidateQueries({ queryKey: ['mensagens-badge'] })
+  )
+  .subscribe()
 ```
 
 ---
 
-## Sidebar — Grupos de Menu e Roles
+## Rotas por Role (Sidebar)
 
-| Grupo | Itens | Roles mínimos |
-|-------|-------|---------------|
-| Principal | Dashboard | todos |
-| Operacional | Clientes, Empréstimos, Parcelas, Pagamentos, Inadimplentes | caixa+ |
-| Financeiro | Caixa, Renegociações, Conciliação, PIX | financeiro+ |
-| Relatórios | Relatórios | financeiro+ |
-| Comunicação | Notificações, Suporte | caixa+ |
-| Administração | Usuários, Configurações, Auditoria | admin |
+| Rota | Admin | Financeiro | Caixa | Consultor |
+|------|-------|-----------|-------|-----------|
+| /dashboard | ✅ | ✅ | ✅ | ✅ |
+| /clientes | ✅ | ✅ | ✅ | — |
+| /emprestimos | ✅ | ✅ | — | — |
+| /parcelas | ✅ | ✅ | ✅ | — |
+| /pagamentos | ✅ | ✅ | ✅ | — |
+| /inadimplentes | ✅ | ✅ | — | — |
+| /caixa | ✅ | ✅ | ✅ | — |
+| /reparcelamentos | ✅ | ✅ | — | ✅ |
+| /intencoes | ✅ | ✅ | — | ✅ |
+| /solicitacoes | ✅ | ✅ | — | ✅ |
+| /cobrancas | ✅ | ✅ | — | ✅ |
+| /consultor/carteira | ✅ | ✅ | — | ✅ |
+| /relatorios | ✅ | ✅ | — | — |
+| /mensagens | ✅ | ✅ | ✅ | ✅ |
+| /configuracoes | ✅ | — | — | — |
+| /auditoria | ✅ | — | — | — |
+| /usuarios | ✅ | — | — | — |
 
 ---
 
-## Dashboard — Estrutura Atual
+## Funções Utilitárias (lib/utils.ts)
 
-**Linha 1 — 4 cards stat (clicáveis):**
+```typescript
+formatCurrency(valor: number | string): string
+// R$ 1.234,56
 
-| Card | Dado | Link |
-|------|------|------|
-| Clientes Ativos | `clientsStats.ativos` | /clientes |
-| Empréstimos Ativos | `loansStats.totalAtivos` | /emprestimos |
-| Clientes Atrasados | `clientsStats.atrasados` | /inadimplentes |
-| Clientes Quitados | `clientsStats.quitados` | — |
+formatDate(date: string | Date): string
+// 21/05/2026
 
-**Nota:** `loansStats` só é buscado se `user.role === 'admin' || 'financeiro'`.
-O role `caixa` vê apenas os cards de clientes.
+formatDateTime(date: string | Date): string
+// 21/05/2026, 14:30
 
-**Linha 2 — 2 cards de lista:**
-- **Clientes Atrasados**: nomes + badge com qtde de parcelas por cliente (de `/installments/overdue`)
-- **Clientes Quitados**: nomes de clientes de `/clients/quitados`
+formatCPF(cpf: string): string
+// 000.000.000-00
+
+formatPhone(phone: string): string
+// (65) 99999-9999
+
+formatCEP(cep: string): string
+// 00000-000
+
+STATUS_LOAN: Record<string, { label: string; variant: BadgeVariant }>
+// ativo, quitado, cancelado, atrasado, aguardando_aceite, aguardando_liberacao
+```
 
 ---
 
 ## Componentes UI Disponíveis
 
-```typescript
-<Button variant="default|outline|ghost|destructive" size="sm|default|lg" />
-<Card> <CardHeader> <CardTitle> <CardContent> </Card>
-<Input type="text|number|date|password" />
-<Select {...register('campo')}> <option value="x">X</option> </Select>
-<Textarea rows={3} />
-<Badge variant="default|success|warning|destructive|outline" />
-<Skeleton className="h-8 w-full" />
-<Label>Texto</Label>
 ```
+components/ui/
+├── button.tsx      → variant: default|outline|ghost|destructive; size: sm|default|lg
+├── input.tsx       → padrão HTML input com estilo
+├── textarea.tsx    → área de texto com resize
+├── select.tsx      → select nativo estilizado
+├── label.tsx       → label acessível
+├── card.tsx        → Card, CardHeader, CardTitle, CardContent
+├── badge.tsx       → variant: default|outline|success|secondary|destructive
+└── skeleton.tsx    → placeholder de carregamento
+```
+
+---
+
+## Regras de Formatação
+
+- **Dados monetários:** sempre `formatCurrency()` — nunca `toFixed()` direto
+- **Datas:** sempre `formatDate()` ou `formatDateTime()`
+- **Simulações financeiras:** `decimal.js` no cliente — nunca `Math.round()` em dinheiro
+- **Operações destrutivas:** `confirm()` obrigatório antes de executar
+- **Rotas:** sempre em **português** (`/clientes`, `/emprestimos`, `/pagamentos`)
+- **Score:** exibir sempre como 0–100 com classificação textual (Baixo/Médio/Alto/Excelente)
+
+---
+
+## Auditoria — Página /auditoria
+
+A página de auditoria exibe o log de todas as ações do sistema com:
+
+- **Filtro por ação** (ex: `EMAIL_ENVIADO`, `EMAIL_FALHOU`, `LOGIN`, `PORTAL_ATIVADO`)
+- **Filtro por entidade** (ex: `client`, `email`, `loan`)
+- **Botões de atalho** para ações frequentes
+- **Linha clicável** expande detalhes (`contexto` com JSON formatado)
+- **Codificação por cor:**
+  - Verde: `ENVIADO`, `ATIVADO`, `APROVADO`, `EXECUTADO`, `LIBERADO`
+  - Vermelho: `FALHOU`, `ERRO`, `BLOQUEADO`, `NEGADO`
+  - Amarelo: `IGNORADO`, `PENDENTE`, `AVISO`
+  - Azul: ações de `EMAIL`
 
 ---
 
 ## Build e Verificação
 
-```powershell
-cd D:\LIDERA\SIAFI\frontend
+```bash
+# Type check
+npx tsc --noEmit
 
-npm run build          # build de produção (lista páginas geradas)
-npx tsc --noEmit       # checar tipos sem buildar
-npm run lint           # linting
+# Build de produção
+npm run build
+
+# Verificar erros nas páginas de clientes
+npx tsc --noEmit 2>&1 | grep clientes
+
+# Restart
+sc.exe stop SIAFI-WEB && sleep 3 && sc.exe start SIAFI-WEB
 ```
-
----
-
-*Última atualização: 2026-05-20*

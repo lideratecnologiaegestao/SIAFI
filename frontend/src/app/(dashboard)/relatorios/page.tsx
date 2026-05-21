@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BarChart2, Download, RefreshCw, TrendingUp, Users, FileText } from 'lucide-react'
+import { BarChart2, RefreshCw, TrendingUp, Users, FileText, FileDown, DollarSign } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate, STATUS_LOAN } from '@/lib/utils'
 import api from '@/lib/api'
 
-type ReportTab = 'movimentacao' | 'carteira' | 'clientes' | 'contratos'
+type ReportTab = 'carteira' | 'faturamento' | 'clientes' | 'movimentacao' | 'contratos'
+
+interface FaturamentoItem {
+  consultorId: number | null
+  consultorNome: string
+  totalRecebido: number
+  faturamentoBruto: number
+  recuperacaoCapital: number
+  quantidadeParcelas: number
+}
 
 export default function RelatoriosPage() {
   const [tab, setTab] = useState<ReportTab>('carteira')
@@ -20,11 +29,18 @@ export default function RelatoriosPage() {
   const [startDate, setStartDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0])
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0])
   const [statusFilter, setStatusFilter] = useState('')
+  const [faturMes, setFaturMes] = useState(today.toISOString().slice(0, 7))
 
   const { data: carteiraData, isLoading: loadingCarteira } = useQuery({
     queryKey: ['reports', 'carteira'],
     queryFn: () => api.get<any>('/reports/carteira').then((r) => r.data),
     enabled: tab === 'carteira',
+  })
+
+  const { data: faturData, isLoading: loadingFatur, refetch: refetchFatur } = useQuery({
+    queryKey: ['reports', 'faturamento', faturMes],
+    queryFn: () => api.get<FaturamentoItem[]>('/reports/faturamento', { params: { mes: faturMes } }).then((r) => r.data),
+    enabled: tab === 'faturamento',
   })
 
   const { data: clientesData, isLoading: loadingClientes } = useQuery({
@@ -45,18 +61,45 @@ export default function RelatoriosPage() {
     enabled: tab === 'contratos',
   })
 
+  async function exportarExcel(endpoint: string, filename: string) {
+    const res = await api.get(endpoint, { responseType: 'blob' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([res.data as BlobPart], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }))
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
   const tabs: { key: ReportTab; label: string; icon: React.ElementType }[] = [
     { key: 'carteira', label: 'Carteira', icon: TrendingUp },
+    { key: 'faturamento', label: 'Faturamento', icon: DollarSign },
     { key: 'clientes', label: 'Clientes', icon: Users },
     { key: 'movimentacao', label: 'Movimentação', icon: BarChart2 },
     { key: 'contratos', label: 'Contratos', icon: FileText },
   ]
 
+  // Totais do faturamento (somados sobre todos os consultores)
+  const faturTotais = faturData
+    ? faturData.reduce(
+        (acc, row) => ({
+          totalRecebido: acc.totalRecebido + (row.totalRecebido ?? 0),
+          faturamentoBruto: acc.faturamentoBruto + (row.faturamentoBruto ?? 0),
+          recuperacaoCapital: acc.recuperacaoCapital + (row.recuperacaoCapital ?? 0),
+          quantidadeParcelas: acc.quantidadeParcelas + (row.quantidadeParcelas ?? 0),
+        }),
+        { totalRecebido: 0, faturamentoBruto: 0, recuperacaoCapital: 0, quantidadeParcelas: 0 }
+      )
+    : null
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><BarChart2 className="size-6" />Relatórios</h1>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <BarChart2 className="size-6" />Relatórios
+          </h1>
           <p className="text-muted-foreground text-sm mt-1">Análises e dados do sistema</p>
         </div>
       </div>
@@ -72,20 +115,22 @@ export default function RelatoriosPage() {
       {tab === 'carteira' && (
         <div className="space-y-4">
           {loadingCarteira ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
+            </div>
           ) : carteiraData ? (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'Valor Investido', value: carteiraData.valorInvestido ?? 0, format: true, color: 'text-foreground' },
-                  { label: 'Valor Total Parcelado', value: carteiraData.valorTotalParcelado ?? 0, format: true, color: 'text-blue-700' },
-                  { label: 'Valor Recebido', value: carteiraData.valorRecebido ?? 0, format: true, color: 'text-green-700' },
-                  { label: 'A Receber', value: carteiraData.aReceber ?? 0, format: true, color: 'text-orange-600' },
+                  { label: 'Capital em Carteira', value: carteiraData.principalEmCarteira ?? carteiraData.valorInvestido ?? 0, color: 'text-foreground' },
+                  { label: 'Total a Receber', value: carteiraData.totalReceivableAtivo ?? carteiraData.valorTotalParcelado ?? 0, color: 'text-blue-700' },
+                  { label: 'Faturamento Realizado', value: carteiraData.faturamentoRealizado ?? carteiraData.valorRecebido ?? 0, color: 'text-green-700' },
+                  { label: 'A Faturar', value: carteiraData.faturamentoAReceber ?? carteiraData.aReceber ?? 0, color: 'text-orange-600' },
                 ].map((item) => (
                   <Card key={item.label}>
                     <CardContent className="pt-4">
                       <p className="text-xs text-muted-foreground">{item.label}</p>
-                      <p className={`text-xl font-bold mt-1 ${item.color}`}>{item.format ? formatCurrency(item.value as number) : item.value}</p>
+                      <p className={`text-xl font-bold mt-1 ${item.color}`}>{formatCurrency(item.value as number)}</p>
                     </CardContent>
                   </Card>
                 ))}
@@ -106,6 +151,102 @@ export default function RelatoriosPage() {
               </div>
             </>
           ) : null}
+        </div>
+      )}
+
+      {tab === 'faturamento' && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex gap-4 flex-wrap items-end">
+                <div className="space-y-1.5">
+                  <Label>Mês de referência</Label>
+                  <Input
+                    type="month"
+                    value={faturMes}
+                    onChange={(e) => setFaturMes(e.target.value)}
+                    className="w-44"
+                  />
+                </div>
+                <Button onClick={() => refetchFatur()} className="gap-2">
+                  <RefreshCw className="size-3.5" />Gerar
+                </Button>
+              </div>
+            </CardHeader>
+          </Card>
+
+          {loadingFatur ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)}
+            </div>
+          ) : faturTotais ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="bg-blue-50 dark:bg-blue-950/20">
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">Total Recebido</p>
+                    <p className="text-xl font-bold mt-1 text-blue-700">{formatCurrency(faturTotais.totalRecebido)}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{faturTotais.quantidadeParcelas} parcela{faturTotais.quantidadeParcelas !== 1 ? 's' : ''} pagas</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-orange-50 dark:bg-orange-950/20">
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">Faturamento Bruto (Lucro)</p>
+                    <p className="text-xl font-bold mt-1 text-orange-600">{formatCurrency(faturTotais.faturamentoBruto)}</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-green-50 dark:bg-green-950/20">
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">Recuperação de Capital</p>
+                    <p className="text-xl font-bold mt-1 text-green-700">{formatCurrency(faturTotais.recuperacaoCapital)}</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {faturData && faturData.length > 0 && (
+                <Card>
+                  <CardHeader><CardTitle className="text-base">Faturamento por Consultor</CardTitle></CardHeader>
+                  <CardContent className="p-0">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/30">
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">Consultor</th>
+                          <th className="text-center px-4 py-2 font-medium text-muted-foreground hidden sm:table-cell">Parcelas</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">Total Recebido</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground hidden md:table-cell">Lucro</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground hidden md:table-cell">Capital Rec.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {faturData.map((row, idx) => (
+                          <tr key={row.consultorId ?? idx} className="border-b border-border hover:bg-muted/20">
+                            <td className="px-4 py-2.5 font-medium">{row.consultorNome ?? 'Sem consultor'}</td>
+                            <td className="px-4 py-2.5 text-center text-muted-foreground hidden sm:table-cell">{row.quantidadeParcelas}</td>
+                            <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(row.totalRecebido)}</td>
+                            <td className="px-4 py-2.5 text-right text-orange-600 hidden md:table-cell">{formatCurrency(row.faturamentoBruto)}</td>
+                            <td className="px-4 py-2.5 text-right text-green-700 hidden md:table-cell">{formatCurrency(row.recuperacaoCapital)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t-2 border-border bg-muted/30">
+                          <td className="px-4 py-2.5 font-semibold">Total</td>
+                          <td className="px-4 py-2.5 text-center font-semibold hidden sm:table-cell">{faturTotais.quantidadeParcelas}</td>
+                          <td className="px-4 py-2.5 text-right font-bold">{formatCurrency(faturTotais.totalRecebido)}</td>
+                          <td className="px-4 py-2.5 text-right font-bold text-orange-600 hidden md:table-cell">{formatCurrency(faturTotais.faturamentoBruto)}</td>
+                          <td className="px-4 py-2.5 text-right font-bold text-green-700 hidden md:table-cell">{formatCurrency(faturTotais.recuperacaoCapital)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              Selecione o mês e clique em Gerar.
+            </div>
+          )}
         </div>
       )}
 
@@ -147,6 +288,10 @@ export default function RelatoriosPage() {
                   <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-44" />
                 </div>
                 <Button onClick={() => refetchMov()} className="gap-2"><RefreshCw className="size-3.5" />Gerar</Button>
+                <Button variant="outline" className="gap-2"
+                  onClick={() => exportarExcel(`/export/movimentacao/excel?startDate=${startDate}&endDate=${endDate}`, `movimentacao-${startDate}-${endDate}.xlsx`)}>
+                  <FileDown className="size-3.5" />Excel
+                </Button>
               </div>
             </CardHeader>
           </Card>
@@ -162,12 +307,16 @@ export default function RelatoriosPage() {
 
       {tab === 'contratos' && (
         <div className="space-y-4">
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap items-center">
             {['', 'ativo', 'quitado', 'inadimplente', 'cancelado'].map((s) => (
               <Button key={s} size="sm" variant={statusFilter === s ? 'default' : 'outline'} onClick={() => setStatusFilter(s)}>
                 {s === '' ? 'Todos' : STATUS_LOAN[s]?.label ?? s}
               </Button>
             ))}
+            <Button size="sm" variant="outline" className="gap-1.5 ml-auto"
+              onClick={() => exportarExcel(`/export/contratos/excel${statusFilter ? `?status=${statusFilter}` : ''}`, `contratos${statusFilter ? `-${statusFilter}` : ''}.xlsx`)}>
+              <FileDown className="size-3.5" />Excel
+            </Button>
           </div>
           {loadingContratos ? <Skeleton className="h-64 w-full" /> : (
             <Card>
@@ -181,7 +330,7 @@ export default function RelatoriosPage() {
                         <tr className="border-b border-border bg-muted/30">
                           <th className="text-left px-4 py-3 font-medium text-muted-foreground">#</th>
                           <th className="text-left px-4 py-3 font-medium text-muted-foreground">Cliente</th>
-                          <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
+                          <th className="text-right px-4 py-3 font-medium text-muted-foreground">Capital</th>
                           <th className="text-center px-4 py-3 font-medium text-muted-foreground">Parcelas</th>
                           <th className="text-left px-4 py-3 font-medium text-muted-foreground">Início</th>
                           <th className="text-center px-4 py-3 font-medium text-muted-foreground">Status</th>
@@ -194,7 +343,7 @@ export default function RelatoriosPage() {
                             <tr key={c.id} className="border-b border-border hover:bg-muted/20">
                               <td className="px-4 py-2.5 text-muted-foreground">#{c.id}</td>
                               <td className="px-4 py-2.5 font-medium">{c.client?.nome}</td>
-                              <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(c.valor)}</td>
+                              <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(c.principalAmount ?? c.valor)}</td>
                               <td className="px-4 py-2.5 text-center text-muted-foreground">{c.numeroParcelas}x</td>
                               <td className="px-4 py-2.5 text-muted-foreground">{formatDate(c.dataInicio)}</td>
                               <td className="px-4 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
@@ -204,9 +353,11 @@ export default function RelatoriosPage() {
                       </tbody>
                       <tfoot>
                         <tr className="border-t-2 border-border bg-muted/30">
-                          <td colSpan={2} className="px-4 py-2.5 font-semibold text-sm">{contratosData.length} contrato{contratosData.length !== 1 ? 's' : ''}</td>
+                          <td colSpan={2} className="px-4 py-2.5 font-semibold text-sm">
+                            {contratosData.length} contrato{contratosData.length !== 1 ? 's' : ''}
+                          </td>
                           <td className="px-4 py-2.5 text-right font-bold text-sm">
-                            {formatCurrency(contratosData.reduce((s: number, c: any) => s + Number(c.valor), 0))}
+                            {formatCurrency(contratosData.reduce((s: number, c: any) => s + Number(c.principalAmount ?? c.valor), 0))}
                           </td>
                           <td colSpan={3} />
                         </tr>

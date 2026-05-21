@@ -1,7 +1,7 @@
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
-  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -9,45 +9,23 @@ import {
   IsString,
   Max,
   Min,
-  ValidateIf,
 } from 'class-validator';
-import { AmortizationType, PaymentMethod } from '@prisma/client';
+import { PaymentMethod } from '@prisma/client';
 
 export class CreateLoanDto {
   @IsInt()
   @IsPositive()
   clientId: number;
 
+  // Capital entregue ao cliente — sai do caixa da Lidera
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
-  valor: number;
+  principalAmount: number;
 
-  @IsOptional()
+  // Lucro total absoluto desejado no contrato — obrigatório
   @IsNumber({ maxDecimalPlaces: 2 })
-  @IsPositive()
-  valorInvestido?: number;
-
-  @IsOptional()
-  @IsEnum(AmortizationType)
-  tipoAmortizacao?: AmortizationType;
-
-  // taxaJuros OU valorParcela devem ser informados — nunca ambos nulos
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
-  @Max(100)
-  @ValidateIf((o: CreateLoanDto) => !o.valorParcela)
-  taxaJuros?: number;
-
-  @IsOptional()
-  @IsIn(['mensal', 'anual'])
-  modoTaxa?: 'mensal' | 'anual';
-
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @IsPositive()
-  @ValidateIf((o: CreateLoanDto) => !o.taxaJuros)
-  valorParcela?: number;
+  targetProfit: number;
 
   @IsInt()
   @Min(1)
@@ -62,24 +40,44 @@ export class CreateLoanDto {
   metodoPagamento?: PaymentMethod;
 
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(10)
-  taxaMulta?: number;
-
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(10)
-  taxaMora?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(30)
-  periodoCarencia?: number;
-
-  @IsOptional()
   @IsString()
   observacoes?: string;
+
+  // Dia fixo de vencimento (1–28); null = usa o dia de dataInicio
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(28)
+  diaVencimento?: number;
+
+  // Multa por atraso override do empréstimo (% sobre saldo); null = fallback settings
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  multaPercentual?: number;
+
+  // Mora diária override (% ao dia); null = fallback settings
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  moraDiariaPercentual?: number;
+
+  // Antecedência para envio da cobrança (dias antes do vencimento)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  diasAntecedenciaCobranca?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  cobrarWhatsapp?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  cobrarEmail?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  cobrarPortal?: boolean;
 }

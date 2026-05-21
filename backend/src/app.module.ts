@@ -24,6 +24,13 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { ClientPortalModule } from './modules/client-portal/client-portal.module';
+import { ConsultorModule } from './modules/consultor/consultor.module';
+import { PdfModule } from './modules/pdf/pdf.module';
+import { ScoreRiscoModule } from './modules/score-risco/score-risco.module';
+import { IntencaoModule } from './modules/intencao/intencao.module';
+import { ReparcelamentoModule } from './modules/reparcelamento/reparcelamento.module';
+import { MensagemModule } from './modules/mensagem/mensagem.module';
+import { CobrancaModule } from './modules/cobranca/cobranca.module';
 import { SupabaseAuthGuard } from './modules/auth/guards/supabase-auth.guard';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
@@ -49,6 +56,13 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     AuditModule,
     SettingsModule,
     ClientPortalModule,
+    ConsultorModule,
+    PdfModule,
+    ScoreRiscoModule,
+    IntencaoModule,
+    ReparcelamentoModule,
+    MensagemModule,
+    CobrancaModule,
   ],
   controllers: [AppController],
   providers: [

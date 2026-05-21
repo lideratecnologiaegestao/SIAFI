@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   Injectable,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SupabaseService } from '../../../supabase/supabase.service';
@@ -13,6 +14,8 @@ export interface RequestUser {
   username: string;
   nome: string;
   role: string;
+  tipo: 'operador' | 'cliente';
+  aal?: string;
 }
 
 @Injectable()
@@ -27,54 +30,167 @@ export class SupabaseAuthGuard implements CanActivate {
     const token = this.extractToken(req);
     if (!token) throw new UnauthorizedException('Token não fornecido');
 
-    const { data: { user }, error } = await this.supabase.admin.auth.getUser(token);
-    if (error || !user) throw new UnauthorizedException('Token inválido ou expirado');
+    const { data: { user: supabaseUser }, error } =
+      await this.supabase.admin.auth.getUser(token);
 
-    // Decode JWT to check aal (Authentication Assurance Level) without extra round-trip
+    if (error || !supabaseUser) {
+      throw new UnauthorizedException('Token inválido ou expirado');
+    }
+
     const aal = this.extractAal(token);
-    const role = (user.app_metadata?.role as string) || '';
-    const prismaId = user.app_metadata?.prismaId as number | undefined;
+    const role = (supabaseUser.app_metadata?.role as string) || '';
+    const prismaId = supabaseUser.app_metadata?.prismaId as number | undefined;
+
+    let resolvedUser: RequestUser;
 
     if (prismaId && role) {
-      // Fast path: all data in JWT claims, no DB lookup needed
-      req.user = {
+      // Fast path: todos os dados no JWT, sem consulta ao banco
+      resolvedUser = {
         id: prismaId,
-        supabaseId: user.id,
-        username: (user.user_metadata?.username as string) || '',
-        nome: (user.user_metadata?.nome as string) || '',
+        supabaseId: supabaseUser.id,
+        username: (supabaseUser.user_metadata?.username as string) || '',
+        nome: (supabaseUser.user_metadata?.nome as string) || '',
         role,
+        tipo: role === 'cliente' ? 'cliente' : 'operador',
         aal,
-      } satisfies RequestUser & { aal: string };
+      };
     } else {
-      // Fallback: user not yet synced — look up by supabaseId
-      const dbUser = await this.prisma.user.findFirst({
-        where: { supabaseId: user.id },
-        select: { id: true, username: true, nome: true, role: true, active: true },
-      });
-      if (!dbUser || !dbUser.active) {
-        throw new UnauthorizedException('Usuário não encontrado ou inativo');
+      // Fallback: lookup duplo — users → clients
+      resolvedUser = await this.resolverUsuario(supabaseUser.id, supabaseUser.email ?? '', aal);
+    }
+
+    // Verificar MFA — admin, financeiro e consultor exigem aal2
+    const mfaObrigatorio = ['admin', 'financeiro', 'consultor'].includes(resolvedUser.role);
+    if (mfaObrigatorio && aal !== 'aal2') {
+      const fatoresVerificados = supabaseUser.factors?.some(
+        (f: { status: string }) => f.status === 'verified',
+      ) ?? false;
+
+      if (fatoresVerificados) {
+        // MFA configurado mas não completado nesta sessão
+        throw new UnauthorizedException('MFA obrigatório — complete o desafio TOTP');
       }
-      req.user = {
-        id: dbUser.id,
-        supabaseId: user.id,
-        username: dbUser.username,
-        nome: dbUser.nome,
-        role: dbUser.role,
+      // MFA ainda não configurado — o frontend deve redirecionar para /mfa-setup
+      // Não bloqueamos aqui para permitir o redirecionamento
+    }
+
+    req.user = resolvedUser;
+    return true;
+  }
+
+  // ─── Resolução dupla: users → clients ────────────────────────────────────
+
+  private async resolverUsuario(
+    supabaseId: string,
+    supabaseEmail: string,
+    aal: string,
+  ): Promise<RequestUser> {
+    // 1. Buscar em users por supabaseId
+    const operador = await this.prisma.user.findFirst({
+      where: { supabaseId, active: true },
+      select: { id: true, username: true, nome: true, role: true },
+    });
+
+    if (operador) {
+      return {
+        id: operador.id,
+        supabaseId,
+        username: operador.username,
+        nome: operador.nome,
+        role: operador.role,
+        tipo: 'operador',
         aal,
       };
     }
 
-    // Enforce MFA for admin and financeiro
-    const mfaRequired = ['admin', 'financeiro'].includes(req.user.role);
-    if (mfaRequired && aal !== 'aal2') {
-      const hasMfaFactor = user.factors?.some((f: { status: string }) => f.status === 'verified');
-      if (hasMfaFactor) {
-        throw new UnauthorizedException('MFA obrigatório — complete o desafio TOTP');
+    // 2. Fallback por email (Google OAuth — supabaseId ainda não vinculado)
+    if (supabaseEmail) {
+      const operadorPorEmail = await this.prisma.user.findFirst({
+        where: { email: supabaseEmail, active: true },
+        select: { id: true, username: true, nome: true, role: true, supabaseId: true },
+      });
+
+      if (operadorPorEmail) {
+        // Sincronizar supabaseId se ainda não vinculado
+        if (!operadorPorEmail.supabaseId) {
+          await this.prisma.user.update({
+            where: { id: operadorPorEmail.id },
+            data: { supabaseId },
+          });
+          await this.supabase.admin.auth.admin.updateUserById(supabaseId, {
+            app_metadata: { role: operadorPorEmail.role, prismaId: operadorPorEmail.id },
+          });
+        }
+        return {
+          id: operadorPorEmail.id,
+          supabaseId,
+          username: operadorPorEmail.username,
+          nome: operadorPorEmail.nome,
+          role: operadorPorEmail.role,
+          tipo: 'operador',
+          aal,
+        };
       }
     }
 
-    return true;
+    // 3. Buscar em clients por supabaseId (portal ativo)
+    const cliente = await this.prisma.client.findFirst({
+      where: { supabaseId, active: true, portalAtivo: true },
+      select: { id: true, nome: true, email: true, supabaseId: true },
+    });
+
+    if (cliente) {
+      return {
+        id: cliente.id,
+        supabaseId,
+        username: '',
+        nome: cliente.nome,
+        role: 'cliente',
+        tipo: 'cliente',
+        aal,
+      };
+    }
+
+    // 4. Fallback por email em clients (Google OAuth de clientes)
+    if (supabaseEmail) {
+      const clientePorEmail = await this.prisma.client.findFirst({
+        where: { email: supabaseEmail, active: true, portalAtivo: true },
+        select: { id: true, nome: true, supabaseId: true },
+      });
+
+      if (clientePorEmail) {
+        if (!clientePorEmail.supabaseId) {
+          await this.prisma.client.update({
+            where: { id: clientePorEmail.id },
+            data: { supabaseId },
+          });
+        }
+        return {
+          id: clientePorEmail.id,
+          supabaseId,
+          username: '',
+          nome: clientePorEmail.nome,
+          role: 'cliente',
+          tipo: 'cliente',
+          aal,
+        };
+      }
+    }
+
+    // 5. Conta não reconhecida — registrar tentativa e negar acesso
+    await this.prisma.auditLog.create({
+      data: {
+        acao: 'ACESSO_NEGADO_DESCONHECIDO',
+        dados: { supabaseId, email: supabaseEmail },
+      },
+    }).catch(() => {}); // AuditLog é best-effort — não bloquear o fluxo
+
+    throw new ForbiddenException(
+      'Conta não autorizada. Acesso restrito a usuários cadastrados.',
+    );
   }
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
 
   private extractToken(req: { headers?: { authorization?: string } }): string | null {
     const auth = req.headers?.authorization;

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Client, Prisma } from '@prisma/client';
 import { extname } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -55,17 +55,23 @@ export class ClientsService {
         skip,
         take: limit,
         orderBy: { nome: 'asc' },
+        include: {
+          consultor: { select: { id: true, nome: true } },
+        },
       }),
       this.prisma.client.count({ where }),
     ]);
 
-    return paginate(data, total, page, limit);
+    return paginate(data as any, total, page, limit);
   }
 
-  async findById(id: number): Promise<Client> {
+  async findById(id: number): Promise<unknown> {
     const client = await this.prisma.client.findUnique({
       where: { id },
-      include: { loans: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        loans: { orderBy: { createdAt: 'asc' } },
+        consultor: { select: { id: true, nome: true } },
+      },
     });
     if (!client) {
       throw new NotFoundException(`Cliente com id ${id} não encontrado`);
@@ -73,7 +79,35 @@ export class ClientsService {
     return client;
   }
 
-  async create(dto: CreateClientDto, files?: UploadedFiles): Promise<Client> {
+  async findConsultores(): Promise<{ id: number; nome: string }[]> {
+    return this.prisma.user.findMany({
+      where: { role: 'consultor', active: true },
+      select: { id: true, nome: true },
+      orderBy: { nome: 'asc' },
+    });
+  }
+
+  async vincularConsultor(clientId: number, consultorId: number | null): Promise<unknown> {
+    const client = await this.prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) throw new NotFoundException(`Cliente ${clientId} não encontrado`);
+
+    if (consultorId !== null) {
+      const consultor = await this.prisma.user.findUnique({ where: { id: consultorId } });
+      if (!consultor || consultor.role !== 'consultor') {
+        throw new BadRequestException('Usuário não encontrado ou não é consultor');
+      }
+    }
+
+    return this.prisma.client.update({
+      where: { id: clientId },
+      data: { consultorId },
+      include: { consultor: { select: { id: true, nome: true } } },
+    });
+  }
+
+  async create(dto: CreateClientDto, files?: UploadedFiles, consultorId?: number): Promise<Client> {
+    const effectiveConsultorId = consultorId ?? dto.consultorId ?? null;
+
     const data: Prisma.ClientCreateInput = {
       nome: dto.nome,
       cpf: dto.cpf ?? null,
@@ -89,6 +123,7 @@ export class ClientsService {
       cep: dto.cep ?? null,
       observacoes: dto.observacoes ?? null,
       notificacoesEmail: dto.notificacoesEmail ?? true,
+      ...(effectiveConsultorId ? { consultor: { connect: { id: effectiveConsultorId } } } : {}),
     };
 
     const client = await this.prisma.client.create({ data });
@@ -121,6 +156,7 @@ export class ClientsService {
     if (dto.observacoes !== undefined) data.observacoes = dto.observacoes;
     if (dto.notificacoesEmail !== undefined) data.notificacoesEmail = dto.notificacoesEmail;
     if (dto.active !== undefined) data.active = dto.active;
+    if ('consultorId' in dto) data.consultorId = (dto as any).consultorId ?? null;
 
     if (files && Object.values(files).some((f) => f?.length)) {
       const paths = await this.uploadFiles(id, files);

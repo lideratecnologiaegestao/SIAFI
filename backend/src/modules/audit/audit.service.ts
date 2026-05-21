@@ -40,12 +40,14 @@ export class AuditService {
     limit: number;
     userId?: number;
     entidade?: string;
+    acao?: string;
   }): Promise<PaginatedResponse<unknown>> {
-    const { page, limit, userId, entidade } = filters;
+    const { page, limit, userId, entidade, acao } = filters;
     const skip = (page - 1) * limit;
     const where: Record<string, unknown> = {};
     if (userId) where.userId = userId;
-    if (entidade) where.entidade = entidade;
+    if (entidade) where.entidade = { contains: entidade };
+    if (acao) where.acao = { contains: acao };
 
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({

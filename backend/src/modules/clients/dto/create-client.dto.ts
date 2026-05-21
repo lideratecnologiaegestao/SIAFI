@@ -2,8 +2,10 @@ import {
   IsBoolean,
   IsDateString,
   IsEmail,
+  IsInt,
   IsNotEmpty,
   IsOptional,
+  IsPositive,
   IsString,
   Length,
   Matches,
@@ -81,4 +83,10 @@ export class CreateClientDto {
     return value;
   })
   notificacoesEmail?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  @Transform(({ value }) => (value !== undefined ? Number(value) : undefined))
+  consultorId?: number;
 }

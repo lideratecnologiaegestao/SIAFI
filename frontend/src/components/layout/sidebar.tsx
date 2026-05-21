@@ -7,11 +7,12 @@ import {
   LayoutDashboard, Users, CreditCard, Receipt, Wallet,
   ArrowLeftRight, Settings, Shield, LogOut, X, ChevronRight,
   AlertCircle, RefreshCcw, QrCode, BarChart2, Bell, MessageSquare,
-  UserCog, ListChecks,
+  UserCog, ListChecks, Briefcase, ClipboardList, TrendingUp, Phone,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth.context'
 import { Button } from '@/components/ui/button'
+import { useUnreadCount } from '@/hooks/useUnreadCount'
 
 interface NavItem {
   label: string
@@ -46,7 +47,8 @@ const navGroups: NavGroup[] = [
     title: 'Financeiro',
     items: [
       { label: 'Caixa', href: '/caixa', icon: ArrowLeftRight, roles: ['admin', 'financeiro', 'caixa'] },
-      { label: 'Renegociações', href: '/renegociacoes', icon: RefreshCcw, roles: ['admin', 'financeiro'] },
+      { label: 'Renegociações',    href: '/renegociacoes',    icon: RefreshCcw, roles: ['admin', 'financeiro'] },
+      { label: 'Reparcelamentos',  href: '/reparcelamentos',  icon: RefreshCcw, roles: ['admin', 'financeiro', 'consultor'] },
       { label: 'Conciliação', href: '/conciliacao', icon: ListChecks, roles: ['admin', 'financeiro'] },
       { label: 'PIX', href: '/pix', icon: QrCode, roles: ['admin', 'financeiro'] },
     ],
@@ -58,8 +60,18 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    title: 'Consultor',
+    items: [
+      { label: 'Minha Carteira', href: '/consultor/carteira', icon: Briefcase, roles: ['consultor'] },
+      { label: 'Solicitações', href: '/solicitacoes', icon: ClipboardList, roles: ['consultor', 'admin', 'financeiro'] },
+      { label: 'Intenções', href: '/intencoes', icon: TrendingUp, roles: ['consultor', 'admin', 'financeiro'] },
+      { label: 'Cobranças', href: '/cobrancas', icon: Phone, roles: ['consultor', 'admin', 'financeiro'] },
+    ],
+  },
+  {
     title: 'Comunicação',
     items: [
+      { label: 'Mensagens',    href: '/mensagens',    icon: MessageSquare, roles: ['admin', 'financeiro', 'consultor', 'caixa'] },
       { label: 'Notificações', href: '/notificacoes', icon: Bell, roles: ['admin', 'financeiro'] },
       { label: 'Suporte', href: '/suporte', icon: MessageSquare, roles: ['admin', 'financeiro', 'caixa'] },
     ],
@@ -82,6 +94,7 @@ interface SidebarProps {
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { user, logout } = useAuth()
+  const unreadCount = useUnreadCount()
 
   const visibleGroups = navGroups.map((group) => ({
     ...group,
@@ -102,8 +115,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const roleLabel: Record<string, string> = {
     admin: 'Administrador',
     financeiro: 'Financeiro',
+    consultor: 'Consultor',
     caixa: 'Caixa',
-    usuario: 'Usuário',
     cliente: 'Cliente',
   }
 
@@ -161,8 +174,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                         : 'text-slate-400 hover:bg-white/8 hover:text-slate-200'
                     )}
                   >
-                    <Icon className="size-4 flex-shrink-0" />
+                    <Icon className="size-4 shrink-0" />
                     <span className="flex-1">{item.label}</span>
+                    {item.href === '/mensagens' && unreadCount > 0 && !active && (
+                      <span className="min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center px-1 font-bold">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </span>
+                    )}
                     {active && <ChevronRight className="size-3 opacity-60" />}
                   </Link>
                 )
@@ -173,7 +191,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         <div className="border-t border-white/10 p-4">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0">
               <span className="text-blue-400 text-xs font-semibold">
                 {user ? getInitials(user.nome) : '?'}
               </span>

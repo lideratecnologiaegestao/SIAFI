@@ -17,6 +17,8 @@ import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 import { ClientsService } from './clients.service';
 import type { UploadedFiles as ClientUploadedFiles } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -49,6 +51,12 @@ export class ClientsController {
     return this.clientsService.getStats();
   }
 
+  @Get('consultores')
+  @Roles('admin', 'financeiro', 'consultor')
+  findConsultores() {
+    return this.clientsService.findConsultores();
+  }
+
   @Get('quitados')
   @Roles('admin', 'financeiro', 'caixa')
   findQuitados() {
@@ -68,13 +76,25 @@ export class ClientsController {
   }
 
   @Post()
-  @Roles('admin', 'financeiro')
+  @Roles('admin', 'financeiro', 'consultor')
   @UseInterceptors(uploadInterceptor)
   create(
     @Body() dto: CreateClientDto,
     @UploadedFiles() files: ClientUploadedFiles,
+    @CurrentUser() currentUser: RequestUser,
   ) {
-    return this.clientsService.create(dto, files);
+    // Consultor always owns the client; admin/financeiro may assign via dto.consultorId
+    const consultorId = currentUser.role === 'consultor' ? currentUser.id : undefined;
+    return this.clientsService.create(dto, files, consultorId);
+  }
+
+  @Patch(':id/vincular-consultor')
+  @Roles('admin', 'financeiro')
+  vincularConsultor(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('consultorId') consultorId: number | null,
+  ) {
+    return this.clientsService.vincularConsultor(id, consultorId ?? null);
   }
 
   @Patch(':id')

@@ -111,7 +111,7 @@ export class PaymentWorker extends WorkerHost {
 
       const valorPago = mpDetail.transaction_amount;
       const novoTotalPago = Number(installment.totalPago) + valorPago;
-      const novoStatus = novoTotalPago >= Number(installment.valor) ? 'pago' : installment.status;
+      const novoStatus = novoTotalPago >= Number(installment.installmentAmount) ? 'pago' : installment.status;
 
       await tx.payment.create({
         data: {

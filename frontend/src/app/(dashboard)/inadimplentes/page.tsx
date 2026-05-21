@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { AlertCircle, RefreshCw } from 'lucide-react'
+import { AlertCircle, FileDown, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,7 +34,17 @@ export default function InadimplentesPage() {
           </h1>
           <p className="text-muted-foreground text-sm mt-1">Clientes com parcelas em atraso</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" />Atualizar</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
+            const res = await api.get('/export/inadimplentes/excel', { responseType: 'blob' })
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(new Blob([res.data as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+            a.download = `inadimplentes-${new Date().toISOString().split('T')[0]}.xlsx`
+            a.click()
+            URL.revokeObjectURL(a.href)
+          }}><FileDown className="size-3.5" />Excel</Button>
+          <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" />Atualizar</Button>
+        </div>
       </div>
 
       {isLoading ? (

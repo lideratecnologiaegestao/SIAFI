@@ -5,6 +5,22 @@
  * This function avoids that by resetting to day 1, advancing the month,
  * then restoring the original day clamped to the last day of the target month.
  */
+export function calcularDataVencimento(
+  dataInicio: Date,
+  numeroParcela: number,
+  diaVencimento?: number | null,
+): Date {
+  const targetMonth = dataInicio.getMonth() + numeroParcela;
+  const targetYear  = dataInicio.getFullYear() + Math.floor(targetMonth / 12);
+  const mes         = ((targetMonth % 12) + 12) % 12;
+  const ultimoDia   = new Date(targetYear, mes + 1, 0).getDate();
+
+  if (diaVencimento && diaVencimento >= 1 && diaVencimento <= 28) {
+    return new Date(targetYear, mes, Math.min(diaVencimento, ultimoDia));
+  }
+  return new Date(targetYear, mes, Math.min(dataInicio.getDate(), ultimoDia));
+}
+
 export function addMonthsSafe(base: Date, months: number): Date {
   const result = new Date(base);
   const targetMonth = result.getMonth() + months;

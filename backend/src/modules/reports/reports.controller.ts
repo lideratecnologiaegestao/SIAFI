@@ -35,4 +35,10 @@ export class ReportsController {
   getContratos(@Query('status') status?: string) {
     return this.reportsService.getContratos(status);
   }
+
+  @Get('faturamento')
+  @Roles('admin', 'financeiro')
+  getFaturamento(@Query('mes') mes: string) {
+    return this.reportsService.getFaturamentoMensal(mes);
+  }
 }

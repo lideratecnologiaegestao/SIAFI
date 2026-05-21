@@ -2,33 +2,359 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PixService } from '../pix/pix.service';
 
 @Injectable()
 export class ClientPortalService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pixService: PixService,
+  ) {}
 
-  // Busca o Client vinculado ao User autenticado.
-  // Lança ForbiddenException se o User não estiver associado a nenhum Client —
-  // impede que qualquer usuário sem vínculo acesse dados alheios.
-  private async resolveClient(userId: number) {
-    const client = await this.prisma.client.findUnique({
-      where: { userId },
-    });
-    if (!client) {
-      throw new ForbiddenException(
-        'Conta de usuário não está vinculada a um registro de cliente',
-      );
+  // clientId vem do JWT (RequestUser.id = client.id via JwtAuthGuard)
+
+  // ─── Home ─────────────────────────────────────────────────────────────────
+
+  async getHome(clientId: number) {
+    const hoje = new Date();
+    const em3dias = new Date(hoje.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    const [loans, ultimosPagamentos, client] = await Promise.all([
+      this.prisma.loan.findMany({
+        where: { clientId, status: { not: 'cancelado' } },
+        include: {
+          installments: {
+            where: { status: { not: 'cancelado' } },
+            orderBy: { dataVencimento: 'asc' },
+            select: {
+              id: true,
+              loanId: true,
+              numero: true,
+              installmentAmount: true,
+              dataVencimento: true,
+              status: true,
+              totalPago: true,
+              // principalPayback e netGain são campos INTERNOS — não selecionar no portal
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.payment.findMany({
+        where: { installment: { loan: { clientId } } },
+        include: {
+          installment: {
+            select: { numero: true, loan: { select: { id: true } } },
+          },
+        },
+        orderBy: { dataPagamento: 'desc' },
+        take: 5,
+      }),
+      this.prisma.client.findUnique({
+        where: { id: clientId },
+        select: { mfaEnabled: true, mfaLoginCount: true, primeiroAcesso: true },
+      }),
+    ]);
+
+    const contratosAtivos = loans.filter(l => l.status === 'ativo' || l.status === 'inadimplente');
+    const todasParcelas = loans.flatMap(l => l.installments);
+
+    const parcelasAtrasadas = todasParcelas.filter(p => p.status === 'atrasado');
+    const proxVencimento = todasParcelas
+      .filter(p => p.status === 'pendente')
+      .sort((a, b) => a.dataVencimento.getTime() - b.dataVencimento.getTime())[0];
+
+    const totalEmAberto = todasParcelas
+      .filter(p => p.status === 'pendente' || p.status === 'atrasado')
+      .reduce((sum, p) => sum + Number(p.installmentAmount), 0);
+
+    // Banner mais urgente
+    let alerta: { tipo: string; mensagem: string; loanId?: number } | null = null;
+    if (parcelasAtrasadas.length > 0) {
+      const p = parcelasAtrasadas[0];
+      const loan = loans.find(l => l.installments.some(i => i.id === p.id));
+      const diasAtraso = Math.floor((hoje.getTime() - p.dataVencimento.getTime()) / 86400000);
+      alerta = {
+        tipo: 'atrasado',
+        mensagem: `Você possui ${parcelasAtrasadas.length} parcela(s) em atraso. Vencida há ${diasAtraso} dia(s).`,
+        loanId: loan?.id,
+      };
+    } else if (proxVencimento && proxVencimento.dataVencimento <= em3dias) {
+      const loan = loans.find(l => l.installments.some(i => i.id === proxVencimento.id));
+      alerta = {
+        tipo: 'vencendo',
+        mensagem: `Parcela de R$ ${Number(proxVencimento.installmentAmount).toFixed(2)} vence em breve.`,
+        loanId: loan?.id,
+      };
+    } else if (client && !client.mfaEnabled) {
+      const restantes = Math.max(0, 5 - (client.mfaLoginCount ?? 0));
+      if (restantes > 0) {
+        alerta = {
+          tipo: 'mfa',
+          mensagem: `Configure o Google Authenticator. Você tem ${restantes} acesso(s) antes de ser obrigatório.`,
+        };
+      }
     }
-    return client;
+
+    return {
+      contratosAtivos: contratosAtivos.length,
+      proximaParcela: proxVencimento
+        ? {
+            valor: Number(proxVencimento.installmentAmount),
+            dataVencimento: proxVencimento.dataVencimento,
+            installmentId: proxVencimento.id,
+          }
+        : null,
+      totalEmAberto,
+      ultimosPagamentos: ultimosPagamentos.map(p => ({
+        id: p.id,
+        valor: Number(p.valorPago),
+        dataPagamento: p.dataPagamento,
+        numeroParcela: p.installment.numero,
+        loanId: p.installment.loan.id,
+        metodoPagamento: p.metodoPagamento,
+      })),
+      alerta,
+    };
   }
 
-  async getMyInfo(userId: number): Promise<unknown> {
-    const client = await this.resolveClient(userId);
+  // ─── Contratos ────────────────────────────────────────────────────────────
 
-    const data = await this.prisma.client.findUnique({
-      where: { id: client.id },
+  async getContratos(clientId: number) {
+    const loans = await this.prisma.loan.findMany({
+      where: { clientId, status: { not: 'cancelado' } },
+      include: {
+        installments: {
+          where: { status: { not: 'cancelado' } },
+          orderBy: { numero: 'asc' },
+          select: {
+            id: true,
+            numero: true,
+            installmentAmount: true,
+            dataVencimento: true,
+            status: true,
+            totalPago: true,
+            // principalPayback e netGain são campos INTERNOS — não retornar ao cliente
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return loans.map(loan => {
+      const pagas = loan.installments.filter(i => i.status === 'pago').length;
+      const percentual = loan.numeroParcelas > 0 ? Math.round((pagas / loan.numeroParcelas) * 100) : 0;
+      const proxParcela = loan.installments.find(i => i.status === 'pendente' || i.status === 'atrasado');
+      const totalPago = loan.installments.reduce((s, i) => s + Number(i.totalPago), 0);
+
+      return {
+        id: loan.id,
+        valor: Number(loan.principalAmount),
+        numeroParcelas: loan.numeroParcelas,
+        dataInicio: loan.dataInicio,
+        status: loan.status,
+        metodoPagamento: loan.metodoPagamento,
+        percentualPago: percentual,
+        totalPago,
+        proximaParcela: proxParcela
+          ? { id: proxParcela.id, valor: Number(proxParcela.installmentAmount), dataVencimento: proxParcela.dataVencimento }
+          : null,
+      };
+    });
+  }
+
+  async getContrato(loanId: number, clientId: number) {
+    const loan = await this.prisma.loan.findFirst({
+      where: { id: loanId, clientId },
+      include: {
+        installments: {
+          where: { status: { not: 'cancelado' } },
+          orderBy: { numero: 'asc' },
+          select: {
+            id: true,
+            numero: true,
+            installmentAmount: true,
+            dataVencimento: true,
+            status: true,
+            totalPago: true,
+            // principalPayback e netGain são campos INTERNOS — não selecionar no portal
+            payments: { select: { dataPagamento: true }, orderBy: { dataPagamento: 'desc' }, take: 1 },
+          },
+        },
+      },
+    });
+    if (!loan) throw new ForbiddenException('Acesso negado.');
+
+    const totalPago = loan.installments.reduce((s, i) => s + Number(i.totalPago), 0);
+    const totalParcelado = Number(loan.totalReceivable);
+
+    return {
+      id: loan.id,
+      valor: Number(loan.principalAmount),
+      numeroParcelas: loan.numeroParcelas,
+      dataInicio: loan.dataInicio,
+      status: loan.status,
+      metodoPagamento: loan.metodoPagamento,
+      totalParcelado,
+      totalPago,
+      saldoRestante: totalParcelado - totalPago,
+      parcelas: loan.installments.map(i => ({
+        id: i.id,
+        numero: i.numero,
+        valor: Number(i.installmentAmount),
+        dataVencimento: i.dataVencimento,
+        status: i.status,
+        dataPagamento: i.payments[0]?.dataPagamento ?? null,
+      })),
+    };
+  }
+
+  // ─── Aceite digital de proposta ───────────────────────────────────────────
+
+  async aceitarContrato(loanId: number, clientId: number, ip: string): Promise<unknown> {
+    const loan = await this.prisma.loan.findFirst({
+      where: { id: loanId, clientId },
+      select: { id: true, status: true, aceiteExpiraEm: true, clientId: true, principalAmount: true, numeroParcelas: true, totalReceivable: true, dataInicio: true },
+    });
+
+    if (!loan) throw new ForbiddenException('Contrato não encontrado.');
+
+    if (loan.status !== 'aguardando_aceite') {
+      throw new BadRequestException(
+        loan.status === 'aguardando_liberacao' || loan.status === 'ativo'
+          ? 'Contrato já foi aceito anteriormente.'
+          : 'Este contrato não está disponível para aceite.',
+      );
+    }
+
+    if (loan.aceiteExpiraEm && loan.aceiteExpiraEm < new Date()) {
+      throw new BadRequestException('O prazo para aceite desta proposta expirou.');
+    }
+
+    const agora = new Date();
+    const payload = JSON.stringify({
+      loanId:          loan.id,
+      clientId:        loan.clientId,
+      principal:       loan.principalAmount.toString(),
+      totalReceivable: loan.totalReceivable.toString(),
+      numeroParcelas:  loan.numeroParcelas,
+      dataInicio:      loan.dataInicio?.toISOString(),
+      timestamp:       agora.toISOString(),
+    });
+    const aceiteHash = createHash('sha256').update(payload).digest('hex');
+
+    await this.prisma.loan.update({
+      where: { id: loanId },
+      data: {
+        status:           'aguardando_liberacao',
+        aceiteClienteEm:  agora,
+        aceiteClienteIp:  ip,
+        aceiteClienteHash: aceiteHash,
+      },
+    });
+
+    return { sucesso: true, aceiteEm: agora };
+  }
+
+  // ─── Pagamentos ───────────────────────────────────────────────────────────
+
+  async getPagamentos(clientId: number, loanId?: number) {
+    const where: Record<string, unknown> = {
+      installment: { loan: { clientId } },
+    };
+    if (loanId) {
+      (where.installment as Record<string, unknown>) = { loan: { clientId, id: loanId } };
+    }
+
+    const pagamentos = await this.prisma.payment.findMany({
+      where,
+      include: {
+        installment: {
+          select: {
+            numero: true,
+            loan: { select: { id: true } },
+          },
+        },
+      },
+      orderBy: { dataPagamento: 'desc' },
+    });
+
+    return pagamentos.map(p => ({
+      id: p.id,
+      valor: Number(p.valorPago),
+      dataPagamento: p.dataPagamento,
+      metodoPagamento: p.metodoPagamento,
+      numeroParcela: p.installment.numero,
+      loanId: p.installment.loan.id,
+    }));
+  }
+
+  // ─── PIX ──────────────────────────────────────────────────────────────────
+
+  async gerarPix(installmentId: number, clientId: number) {
+    // Validar ownership
+    const installment = await this.prisma.installment.findFirst({
+      where: { id: installmentId, loan: { clientId } },
+    });
+    if (!installment) throw new ForbiddenException('Parcela não encontrada.');
+
+    // Delegar geração ao PixService (idempotência já está lá)
+    const pix = await this.pixService.generate({ installmentId, tipo: 'pix' } as any) as any;
+
+    return {
+      pixId: pix.id,
+      qrCode: pix.qrCode ?? null,
+      qrImage: pix.qrImage ?? null,
+      valor: Number(pix.amount ?? installment.installmentAmount),
+      expiresAt: pix.expiresAt ?? null,
+      status: pix.status,
+    };
+  }
+
+  async getPixStatus(pixId: number, clientId: number) {
+    const pix = await this.prisma.pixPayment.findFirst({
+      where: {
+        id: pixId,
+        client: { id: clientId },
+      },
+      select: { id: true, status: true, updatedAt: true },
+    });
+    if (!pix) throw new ForbiddenException('Pagamento não encontrado.');
+    return { status: pix.status, updatedAt: pix.updatedAt };
+  }
+
+  // ─── Suporte ──────────────────────────────────────────────────────────────
+
+  async getTickets(clientId: number) {
+    return this.prisma.supportTicket.findMany({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getTicket(ticketId: number, clientId: number) {
+    const ticket = await this.prisma.supportTicket.findFirst({
+      where: { id: ticketId, clientId },
+    });
+    if (!ticket) throw new ForbiddenException('Ticket não encontrado.');
+    return ticket;
+  }
+
+  async createTicket(clientId: number, assunto: string, mensagem: string) {
+    return this.prisma.supportTicket.create({
+      data: { clientId, assunto, mensagem },
+    });
+  }
+
+  // ─── Perfil ───────────────────────────────────────────────────────────────
+
+  async getPerfil(clientId: number) {
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
       select: {
         id: true,
         nome: true,
@@ -37,63 +363,62 @@ export class ClientPortalService {
         whatsapp: true,
         telefone: true,
         endereco: true,
+        bairro: true,
         cidade: true,
         estado: true,
+        mfaEnabled: true,
+        mfaLoginCount: true,
+        notificacoesEmail: true,
+        notificacoesWhatsapp: true,
+        senhaTemporaria: true,
+        primeiroAcesso: true,
       },
     });
-    if (!data) throw new NotFoundException('Dados do cliente não encontrados');
-    return data;
+    if (!client) throw new NotFoundException('Cliente não encontrado.');
+    return client;
   }
 
-  async getMyLoans(userId: number): Promise<unknown> {
-    const client = await this.resolveClient(userId);
-
-    return this.prisma.loan.findMany({
-      where: { clientId: client.id },
-      include: {
-        installments: {
-          orderBy: { numero: 'asc' },
-          where: { status: { not: 'cancelado' } },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
+  async marcarPrimeiroAcessoConcluido(clientId: number) {
+    await this.prisma.client.update({
+      where: { id: clientId },
+      data: { primeiroAcesso: false, senhaTemporaria: false },
     });
+    return { sucesso: true };
   }
 
-  async getMyInstallments(userId: number): Promise<unknown> {
-    const client = await this.resolveClient(userId);
-
-    return this.prisma.installment.findMany({
-      where: {
-        loan: { clientId: client.id },
-        status: { not: 'cancelado' },
-      },
-      include: {
-        loan: { select: { id: true, valor: true } },
-        payments: { orderBy: { dataPagamento: 'desc' } },
-      },
-      orderBy: [{ status: 'asc' }, { dataVencimento: 'asc' }],
+  async marcarTicketLido(ticketId: number, clientId: number) {
+    const ticket = await this.prisma.supportTicket.findFirst({
+      where: { id: ticketId, clientId },
+    });
+    if (!ticket) throw new ForbiddenException('Ticket não encontrado.');
+    return this.prisma.supportTicket.update({
+      where: { id: ticketId },
+      data: { lido: true },
     });
   }
 
-  async getMyTickets(userId: number): Promise<unknown> {
-    const client = await this.resolveClient(userId);
-
-    return this.prisma.supportTicket.findMany({
-      where: { clientId: client.id },
-      orderBy: { createdAt: 'desc' },
+  async updateMfaStatus(clientId: number, mfaEnabled: boolean) {
+    await this.prisma.client.update({
+      where: { id: clientId },
+      data: { mfaEnabled },
     });
+    return { sucesso: true };
   }
 
-  async createTicket(
-    userId: number,
-    assunto: string,
-    mensagem: string,
-  ): Promise<unknown> {
-    const client = await this.resolveClient(userId);
+  async updateNotificacoes(
+    clientId: number,
+    notificacoesEmail?: boolean,
+    notificacoesWhatsapp?: boolean,
+  ) {
+    const data: Record<string, boolean> = {};
+    if (notificacoesEmail !== undefined) data.notificacoesEmail = notificacoesEmail;
+    if (notificacoesWhatsapp !== undefined) data.notificacoesWhatsapp = notificacoesWhatsapp;
 
-    return this.prisma.supportTicket.create({
-      data: { clientId: client.id, assunto, mensagem },
+    const updated = await this.prisma.client.update({
+      where: { id: clientId },
+      data,
+      select: { notificacoesEmail: true, notificacoesWhatsapp: true },
     });
+    return updated;
   }
 }

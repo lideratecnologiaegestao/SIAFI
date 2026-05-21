@@ -1,15 +1,23 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PaymentMethod } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { PaymentMethod, Prisma } from '@prisma/client';
+import { createHash } from 'crypto';
+import Decimal from 'decimal.js';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ScoreRiscoService } from '../score-risco/score-risco.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+
+Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly scoreRisco: ScoreRiscoService,
+  ) {}
 
   async create(dto: CreatePaymentDto, userId?: number): Promise<unknown> {
     const payment = await this.prisma.$transaction(async (tx) => {
-      // 1. Find installment with loan and client
+      // 1. Buscar parcela com loan e client
       const installment = await tx.installment.findUnique({
         where: { id: dto.installmentId },
         include: {
@@ -22,70 +30,147 @@ export class PaymentsService {
       });
 
       if (!installment) {
-        throw new NotFoundException(
-          `Parcela com id ${dto.installmentId} não encontrada`,
+        throw new NotFoundException(`Parcela com id ${dto.installmentId} não encontrada`);
+      }
+
+      if (installment.status === 'pago' || installment.status === 'cancelado') {
+        throw new BadRequestException(`Parcela já está ${installment.status}.`);
+      }
+
+      const valorPago         = new Decimal(dto.valorPago.toString());
+      const installmentAmount = new Decimal(installment.installmentAmount.toString());
+      const moraAcumulada     = new Decimal(installment.moraAcumulada.toString());
+      const totalPagoAnt      = new Decimal(installment.totalPago.toString());
+      const novoTotalPago     = totalPagoAnt.plus(valorPago);
+      const limiteMaximo      = installmentAmount.plus(moraAcumulada);
+
+      if (valorPago.lte(0)) {
+        throw new BadRequestException('Valor do pagamento deve ser positivo.');
+      }
+      if (novoTotalPago.greaterThan(limiteMaximo)) {
+        throw new BadRequestException(
+          `Valor pago (${novoTotalPago.toFixed(2)}) excede o saldo devedor com mora (${limiteMaximo.toFixed(2)}).`,
         );
       }
 
-      // 2. Create Payment record
+      const novoSaldo     = installmentAmount.minus(novoTotalPago).clampedTo(0, Infinity);
+      const parcialmenteQuitado = novoTotalPago.greaterThanOrEqualTo(installmentAmount);
+
+      // Status: pago (quitou o principal), parcialmente_pago, ou mantém atrasado se vencida
+      let novoStatus: string;
+      if (parcialmenteQuitado) {
+        novoStatus = 'pago';
+      } else {
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const venc = new Date(installment.dataVencimento);
+        venc.setHours(0, 0, 0, 0);
+        novoStatus = venc < hoje ? 'atrasado' : 'parcialmente_pago';
+      }
+
+      // Snapshot "antes"
+      const snapshotAntes = {
+        status:       installment.status,
+        totalPago:    totalPagoAnt.toString(),
+        saldoDevedor: installment.saldoDevedor.toString(),
+        moraAcumulada: moraAcumulada.toString(),
+      };
+
+      // 2. Criar registro de pagamento
       const newPayment = await tx.payment.create({
         data: {
-          installmentId: dto.installmentId,
-          valorPago: dto.valorPago,
-          dataPagamento: new Date(dto.dataPagamento),
+          installmentId:   dto.installmentId,
+          valorPago:       valorPago.toDecimalPlaces(2).toNumber(),
+          dataPagamento:   new Date(dto.dataPagamento),
           metodoPagamento: (dto.metodoPagamento ?? 'dinheiro') as PaymentMethod,
-          observacao: dto.observacao ?? null,
+          observacao:      dto.observacao ?? null,
         },
       });
 
-      // 3. Update installment totalPago
-      const novoTotalPago = Number(installment.totalPago) + dto.valorPago;
-      const novoStatus =
-        novoTotalPago >= Number(installment.valor) ? 'pago' : installment.status;
-
+      // 3. Atualizar totalPago, saldoDevedor e status
       await tx.installment.update({
         where: { id: dto.installmentId },
         data: {
-          totalPago: novoTotalPago,
-          status: novoStatus,
+          totalPago:    novoTotalPago.toDecimalPlaces(2).toNumber(),
+          saldoDevedor: novoSaldo.toDecimalPlaces(2).toNumber(),
+          status:       novoStatus as any,
         },
       });
 
-      // 5. Check if all loan installments are paid
+      // 4. Verificar quitação total do contrato
       if (novoStatus === 'pago') {
         const unpaidCount = await tx.installment.count({
           where: {
             loanId: installment.loanId,
-            status: { not: 'pago' },
-            id: { not: dto.installmentId },
+            status: { notIn: ['pago', 'cancelado'] },
+            id:     { not: dto.installmentId },
           },
         });
-
         if (unpaidCount === 0) {
           await tx.loan.update({
             where: { id: installment.loanId },
-            data: { status: 'quitado' },
+            data:  { status: 'quitado' },
           });
         }
       }
 
-      // 6. Create Transaction
-      const clientNome = installment.loan.client.nome;
+      // 5. Criar Transaction financeira
       await tx.transaction.create({
         data: {
-          tipo: 'entrada',
-          valor: dto.valorPago,
-          descricao: `Pgto parcela #${installment.numero} - ${clientNome}`,
+          tipo:      'entrada',
+          valor:     valorPago.toDecimalPlaces(2).toNumber(),
+          descricao: `Pgto ${novoStatus === 'pago' ? 'total' : 'parcial'} parcela #${installment.numero} - ${installment.loan.client.nome}`,
           categoria: 'Pagamento de Parcela',
-          data: new Date(dto.dataPagamento),
-          userId: userId ?? null,
+          data:      new Date(dto.dataPagamento),
+          userId:    userId ?? null,
         },
       });
 
-      return newPayment;
+      // 6. AuditLog
+      const snapshotDepois = {
+        status:       novoStatus,
+        totalPago:    novoTotalPago.toString(),
+        saldoDevedor: novoSaldo.toString(),
+        parcial:      novoStatus !== 'pago',
+      };
+
+      const dadosAudit = {
+        snapshot: {
+          antes: snapshotAntes,
+          depois: snapshotDepois,
+          pagamento: {
+            paymentId:       newPayment.id,
+            valorPago:       valorPago.toString(),
+            metodoPagamento: dto.metodoPagamento ?? 'dinheiro',
+            dataPagamento:   dto.dataPagamento,
+            parcela_split: {
+              principalPayback: installment.principalPayback.toString(),
+              netGain:          installment.netGain.toString(),
+            },
+          },
+        },
+      };
+
+      const hash = createHash('sha256')
+        .update(JSON.stringify({ userId, acao: 'PAYMENT_REGISTRADO', entidade: 'installments', entidadeId: installment.id, dados: dadosAudit, ts: Date.now() }))
+        .digest('hex');
+
+      await tx.auditLog.create({
+        data: {
+          userId:     userId ?? null,
+          acao:       'PAYMENT_REGISTRADO',
+          entidade:   'installments',
+          entidadeId: installment.id,
+          dados:      dadosAudit as Prisma.InputJsonValue,
+          hash,
+        },
+      });
+
+      return { payment: newPayment, clientId: installment.loan.client.id };
     });
 
-    return payment;
+    void this.scoreRisco.recalcularScore(payment.clientId);
+    return payment.payment;
   }
 
   async findAll(search?: string): Promise<unknown[]> {
@@ -120,16 +205,14 @@ export class PaymentsService {
 
   async estornar(id: number, userId?: number): Promise<unknown> {
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Find payment with installment
+      // 1. Buscar pagamento com parcela e loan
       const payment = await tx.payment.findUnique({
         where: { id },
         include: {
           installment: {
             include: {
               loan: {
-                include: {
-                  client: { select: { nome: true } },
-                },
+                include: { client: { select: { id: true, nome: true } } },
               },
             },
           },
@@ -141,57 +224,123 @@ export class PaymentsService {
       }
 
       const installment = payment.installment;
-      const loan = installment.loan;
+      const loan        = installment.loan;
 
-      // 2. Delete payment
+      // Snapshot "antes" do estorno
+      const snapshotAntes = {
+        status:            installment.status,
+        totalPago:         installment.totalPago.toString(),
+        installmentAmount: installment.installmentAmount.toString(),
+        principalPayback:  installment.principalPayback.toString(),
+        netGain:           installment.netGain.toString(),
+      };
+
+      // 2. Deletar o pagamento
       await tx.payment.delete({ where: { id } });
 
-      // 3. Recalculate installment totalPago
-      const remainingPayments = await tx.payment.aggregate({
+      // 3. Recalcular totalPago restante
+      const remaining = await tx.payment.aggregate({
         where: { installmentId: installment.id },
-        _sum: { valorPago: true },
+        _sum:  { valorPago: true },
       });
-      const novoTotalPago = Number(remainingPayments._sum.valorPago ?? 0);
+      const novoTotalPago = Number(remaining._sum.valorPago ?? 0);
 
-      // 4. Determine new installment status
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      // 4. Determinar novo status da parcela após estorno
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
       const vencimento = new Date(installment.dataVencimento);
       vencimento.setHours(0, 0, 0, 0);
-      const novoStatus = vencimento < today ? 'atrasado' : 'pendente';
+      const vencido = vencimento < hoje;
+
+      let novoStatus: string;
+      if (novoTotalPago <= 0) {
+        novoStatus = vencido ? 'atrasado' : 'pendente';
+      } else {
+        // ainda há pagamento parcial
+        novoStatus = vencido ? 'atrasado' : 'parcialmente_pago';
+      }
+
+      const installmentAmount = new Decimal(installment.installmentAmount.toString());
+      const novoSaldo = installmentAmount.minus(novoTotalPago).clampedTo(0, Infinity);
 
       await tx.installment.update({
         where: { id: installment.id },
-        data: {
-          totalPago: novoTotalPago,
-          status: novoStatus,
-        },
+        data:  { totalPago: novoTotalPago, saldoDevedor: novoSaldo.toDecimalPlaces(2).toNumber(), status: novoStatus as any },
       });
 
-      // 5. If loan was 'quitado', set back to 'ativo'
+      // 5. Se loan estava quitado, voltar para ativo
       if (loan.status === 'quitado') {
         await tx.loan.update({
           where: { id: loan.id },
-          data: { status: 'ativo' },
+          data:  { status: 'ativo' },
         });
       }
 
-      // 6. Create estorno Transaction
+      // 6. Criar Transaction de estorno
       const clientNome = loan.client.nome;
       await tx.transaction.create({
         data: {
-          tipo: 'saida',
-          valor: Number(payment.valorPago),
+          tipo:      'saida',
+          valor:     Number(payment.valorPago),
           descricao: `Estorno pagamento parcela #${installment.numero} - ${clientNome}`,
           categoria: 'Estorno',
-          data: new Date(),
-          userId: userId ?? null,
+          data:      new Date(),
+          userId:    userId ?? null,
         },
       });
 
-      return { message: 'Pagamento estornado com sucesso', paymentId: id };
+      // 7. AuditLog — snapshot do estorno com split
+      const snapshotDepois = {
+        status:    novoStatus,
+        totalPago: novoTotalPago.toString(),
+      };
+
+      const dadosAudit = {
+        snapshot: {
+          antes: snapshotAntes,
+          depois: snapshotDepois,
+          estorno: {
+            paymentId:       id,
+            valorEstornado:  payment.valorPago.toString(),
+            metodoPagamento: payment.metodoPagamento,
+            parcela_split: {
+              principalPayback: installment.principalPayback.toString(),
+              netGain:          installment.netGain.toString(),
+            },
+          },
+        },
+      };
+
+      const hash = createHash('sha256')
+        .update(JSON.stringify({
+          userId,
+          acao:       'PAYMENT_ESTORNADO',
+          entidade:   'installments',
+          entidadeId: installment.id,
+          dados:      dadosAudit,
+          ts:         Date.now(),
+        }))
+        .digest('hex');
+
+      await tx.auditLog.create({
+        data: {
+          userId:     userId ?? null,
+          acao:       'PAYMENT_ESTORNADO',
+          entidade:   'installments',
+          entidadeId: installment.id,
+          dados:      dadosAudit as Prisma.InputJsonValue,
+          hash,
+        },
+      });
+
+      return {
+        message: 'Pagamento estornado com sucesso',
+        paymentId: id,
+        clientId: installment.loan.client.id,
+      };
     });
 
-    return result;
+    void this.scoreRisco.recalcularScore(result.clientId);
+    return { message: result.message, paymentId: result.paymentId };
   }
 }

@@ -8,6 +8,8 @@ export interface NotificationJobData {
   valorParcela?: number;
   dataVencimento?: string;
   senhaTemporaria?: string;
+  isReenvio?: boolean;
+  pdfBase64?: string;
   templateVars?: Record<string, string>;
 }
 

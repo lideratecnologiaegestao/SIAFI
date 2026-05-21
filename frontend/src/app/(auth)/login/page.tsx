@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const loginSchema = z.object({
-  username: z.string().min(1, 'Usuário é obrigatório'),
+  identificador: z.string().min(1, 'Usuário ou e-mail é obrigatório'),
   password: z.string().min(1, 'Senha é obrigatória'),
 })
 
@@ -22,12 +22,16 @@ type LoginFormData = z.infer<typeof loginSchema>
 
 const OAUTH_ERRORS: Record<string, string> = {
   oauth_cancelado: 'Login com Google cancelado.',
-  auth_falhou: 'Falha na autenticação. Tente novamente.',
+  auth_falhou: 'Falha na autenticação com o Google. Tente novamente.',
   acesso_negado: 'Usuário sem acesso ao sistema. Contate o administrador.',
+  conta_nao_cadastrada:
+    'Esta conta Google não está cadastrada no sistema. Entre em contato com o administrador ou seu consultor.',
+  erro_validacao:
+    'Erro ao validar sua conta. Tente novamente ou use e-mail e senha.',
 }
 
 export default function LoginPage() {
-  const { login, loginWithGoogle, isAuthenticated, isLoading } = useAuth()
+  const { login, loginWithGoogle, isAuthenticated, isLoading, user } = useAuth()
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
@@ -42,9 +46,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.replace('/dashboard')
+      router.replace(user?.role === 'cliente' ? '/portal' : '/dashboard')
     }
-  }, [isAuthenticated, isLoading, router])
+  }, [isAuthenticated, isLoading, user, router])
 
   const {
     register,
@@ -60,8 +64,10 @@ export default function LoginPage() {
       const result = await login(data)
       if (result.needsMfa) {
         router.replace('/mfa-challenge')
+      } else if (result.setupMfaRequired) {
+        router.replace('/mfa-setup')
       } else {
-        router.replace('/dashboard')
+        router.replace(result.role === 'cliente' ? '/portal' : '/dashboard')
       }
     } catch {
       setServerError('Usuário ou senha inválidos.')
@@ -109,17 +115,17 @@ export default function LoginPage() {
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
           <div className="space-y-1.5">
-            <Label htmlFor="username">Usuário</Label>
+            <Label htmlFor="identificador">Usuário ou e-mail</Label>
             <Input
-              id="username"
+              id="identificador"
               type="text"
               autoComplete="username"
-              placeholder="seu.usuario"
-              {...register('username')}
-              aria-invalid={!!errors.username}
+              placeholder="seu.usuario ou email@exemplo.com"
+              {...register('identificador')}
+              aria-invalid={!!errors.identificador}
             />
-            {errors.username && (
-              <p className="text-xs text-destructive">{errors.username.message}</p>
+            {errors.identificador && (
+              <p className="text-xs text-destructive">{errors.identificador.message}</p>
             )}
           </div>
 
@@ -207,7 +213,11 @@ export default function LoginPage() {
           {googleLoading ? 'Redirecionando...' : 'Entrar com Google'}
         </Button>
 
-        <p className="mt-6 text-center text-xs text-muted-foreground">
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          Somente contas previamente cadastradas têm acesso.
+        </p>
+
+        <p className="mt-4 text-center text-xs text-muted-foreground">
           SIAFI — Sistema Integrado de Apoio Financeiro
           <br />
           Lidera &copy; {new Date().getFullYear()}

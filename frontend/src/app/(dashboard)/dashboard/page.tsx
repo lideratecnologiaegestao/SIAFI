@@ -1,12 +1,15 @@
 'use client'
 
-import { useQueries } from '@tanstack/react-query'
-import { Users, TrendingUp, AlertTriangle, CheckCircle, RefreshCw, ChevronRight } from 'lucide-react'
+import { useState } from 'react'
+import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Users, TrendingUp, AlertTriangle, CheckCircle, RefreshCw, ChevronRight, Banknote } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { formatDate } from '@/lib/utils'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { formatDate, formatCurrency, formatDateTime } from '@/lib/utils'
 import api from '@/lib/api'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
@@ -28,6 +31,11 @@ interface LoanStats {
   valorRecebidoMes: number
 }
 
+interface CarteiraStats {
+  faturamentoAReceber: number
+  principalARecuperar: number
+}
+
 interface OverdueInstallment {
   id: number
   numero: number
@@ -44,6 +52,13 @@ interface QuitadoClient {
   id: number
   nome: string
   cpf: string | null
+}
+
+interface PendenteLiberacao {
+  id: number
+  principalAmount: number
+  aceiteClienteEm: string | null
+  client: { id: number; nome: string; nomeSocial: string | null }
 }
 
 const colorMap = {
@@ -76,9 +91,10 @@ interface StatCardProps {
   color: keyof typeof colorMap
   isLoading: boolean
   href?: string
+  subItems?: { label: string; value: string; color?: string }[]
 }
 
-function StatCard({ title, value, icon: Icon, color, isLoading, href }: StatCardProps) {
+function StatCard({ title, value, icon: Icon, color, isLoading, href, subItems }: StatCardProps) {
   const colors = colorMap[color]
   const content = (
     <Card className={cn('border-0 shadow-sm cursor-default', colors.bg, href && 'cursor-pointer')}>
@@ -89,12 +105,23 @@ function StatCard({ title, value, icon: Icon, color, isLoading, href }: StatCard
         </div>
       </CardHeader>
       <CardContent className="flex items-end justify-between">
-        {isLoading ? (
-          <Skeleton className="h-8 w-28 mb-1" />
-        ) : (
-          <p className={cn('text-2xl font-bold', colors.value)}>{value}</p>
-        )}
-        {href && <ChevronRight className="size-4 text-muted-foreground" />}
+        <div className="flex-1">
+          {isLoading ? (
+            <Skeleton className="h-8 w-28 mb-1" />
+          ) : (
+            <p className={cn('text-2xl font-bold', colors.value)}>{value}</p>
+          )}
+          {subItems && !isLoading && (
+            <div className="mt-1.5 space-y-0.5">
+              {subItems.map((sub) => (
+                <p key={sub.label} className={cn('text-xs', sub.color ?? 'text-muted-foreground')}>
+                  {sub.label}: <span className="font-medium">{sub.value}</span>
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+        {href && <ChevronRight className="size-4 text-muted-foreground self-start mt-1" />}
       </CardContent>
     </Card>
   )
@@ -106,7 +133,45 @@ function StatCard({ title, value, icon: Icon, color, isLoading, href }: StatCard
 export default function DashboardPage() {
   const { connected } = useRealtimeDashboard()
   const { user } = useAuth()
+  const qc = useQueryClient()
   const canSeeLoansStats = user?.role === 'admin' || user?.role === 'financeiro'
+  const canLiberar = user?.role === 'admin' || user?.role === 'financeiro' || user?.role === 'caixa'
+
+  const [liberarModal, setLiberarModal] = useState<PendenteLiberacao | null>(null)
+  const [metodoLiberacao, setMetodoLiberacao] = useState('dinheiro')
+  const [dataLiberacao, setDataLiberacao] = useState(new Date().toISOString().split('T')[0])
+  const [obsLiberacao, setObsLiberacao] = useState('')
+
+  const pendentesQuery = useQuery({
+    queryKey: ['loans', 'pendentes-liberacao'],
+    queryFn: () => api.get<PendenteLiberacao[]>('/loans/pendentes-liberacao').then(r => r.data),
+    enabled: canLiberar,
+    refetchInterval: 60_000,
+  })
+
+  const liberarMut = useMutation({
+    mutationFn: (loanId: number) =>
+      api.patch(`/loans/${loanId}/liberar-capital`, {
+        metodoLiberacao,
+        dataLiberacao,
+        observacao: obsLiberacao || undefined,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['loans', 'pendentes-liberacao'] })
+      void qc.invalidateQueries({ queryKey: ['loans', 'stats'] })
+      setLiberarModal(null)
+      setMetodoLiberacao('dinheiro')
+      setDataLiberacao(new Date().toISOString().split('T')[0])
+      setObsLiberacao('')
+    },
+  })
+
+  function abrirLiberacao(loan: PendenteLiberacao) {
+    setLiberarModal(loan)
+    setMetodoLiberacao('dinheiro')
+    setDataLiberacao(new Date().toISOString().split('T')[0])
+    setObsLiberacao('')
+  }
 
   const results = useQueries({
     queries: [
@@ -127,10 +192,15 @@ export default function DashboardPage() {
         queryKey: ['clients', 'quitados'],
         queryFn: () => api.get<QuitadoClient[]>('/clients/quitados').then((r) => r.data),
       },
+      {
+        queryKey: ['reports', 'carteira'],
+        queryFn: () => api.get<CarteiraStats>('/reports/carteira').then((r) => r.data),
+        enabled: canSeeLoansStats,
+      },
     ],
   })
 
-  const [clientsQuery, loansQuery, overdueQuery, quitadosQuery] = results
+  const [clientsQuery, loansQuery, overdueQuery, quitadosQuery, carteiraQuery] = results
   const isAnyLoading = results.some((r) => r.isLoading)
   const isAnyError = results.some((r) => r.isError)
 
@@ -204,6 +274,10 @@ export default function DashboardPage() {
           color="green"
           isLoading={loansQuery.isLoading}
           href="/emprestimos"
+          subItems={canSeeLoansStats && carteiraQuery.data ? [
+            { label: 'A faturar', value: carteiraQuery.data.faturamentoAReceber != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(carteiraQuery.data.faturamentoAReceber) : '—' },
+            { label: 'Capital em risco', value: carteiraQuery.data.principalARecuperar != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(carteiraQuery.data.principalARecuperar) : '—' },
+          ] : undefined}
         />
         <StatCard
           title="Clientes Atrasados"
@@ -221,6 +295,47 @@ export default function DashboardPage() {
           isLoading={clientsQuery.isLoading}
         />
       </div>
+
+      {/* Liberações pendentes — visível para caixa, financeiro e admin */}
+      {canLiberar && ((pendentesQuery.data?.length ?? 0) > 0 || pendentesQuery.isLoading) && (
+        <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-amber-800 dark:text-amber-300">
+              <Banknote className="size-4" />
+              Liberações pendentes
+              {(pendentesQuery.data?.length ?? 0) > 0 && (
+                <Badge className="bg-amber-500 text-white text-xs">
+                  {pendentesQuery.data?.length}
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {pendentesQuery.isLoading ? (
+              <div className="space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            ) : (
+              <div className="space-y-2">
+                {pendentesQuery.data?.map(loan => (
+                  <div key={loan.id} className="flex items-center justify-between bg-white dark:bg-slate-900 rounded-lg px-4 py-3 border border-amber-100 dark:border-amber-900">
+                    <div>
+                      <p className="text-sm font-medium">{loan.client.nomeSocial ?? loan.client.nome}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Contrato #{loan.id} · {formatCurrency(loan.principalAmount)}
+                        {loan.aceiteClienteEm && (
+                          <span className="ml-2">· Aceito em {formatDateTime(loan.aceiteClienteEm)}</span>
+                        )}
+                      </p>
+                    </div>
+                    <Button size="sm" className="ml-4 shrink-0" onClick={() => abrirLiberacao(loan)}>
+                      Confirmar liberação →
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 2 list cards: Clientes Atrasados e Clientes Quitados */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -307,6 +422,70 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Modal de confirmação de liberação de capital */}
+      <Dialog open={!!liberarModal} onOpenChange={(o) => { if (!o) setLiberarModal(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirmar liberação de capital</DialogTitle>
+          </DialogHeader>
+          {liberarModal && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg bg-muted/50 px-4 py-3 space-y-1">
+                <p className="text-sm"><span className="text-muted-foreground">Cliente:</span> <span className="font-medium">{liberarModal.client.nomeSocial ?? liberarModal.client.nome}</span></p>
+                <p className="text-sm"><span className="text-muted-foreground">Valor:</span> <span className="font-semibold text-green-700 dark:text-green-400">{formatCurrency(liberarModal.principalAmount)}</span></p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Método de entrega *</label>
+                <select
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  value={metodoLiberacao}
+                  onChange={e => setMetodoLiberacao(e.target.value)}
+                >
+                  <option value="dinheiro">Dinheiro em espécie</option>
+                  <option value="pix">PIX</option>
+                  <option value="ted">TED / Transferência bancária</option>
+                  <option value="transferencia">Transferência interna</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Data de liberação *</label>
+                <Input
+                  type="date"
+                  value={dataLiberacao}
+                  onChange={e => setDataLiberacao(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Observação (opcional)</label>
+                <Input
+                  placeholder="ex: entregue pessoalmente na agência"
+                  value={obsLiberacao}
+                  onChange={e => setObsLiberacao(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+
+              <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded px-3 py-2">
+                ⚠ Esta ação iniciará a contagem das parcelas a partir da data de liberação informada.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLiberarModal(null)}>Cancelar</Button>
+            <Button
+              onClick={() => liberarModal && liberarMut.mutate(liberarModal.id)}
+              disabled={liberarMut.isPending || !metodoLiberacao || !dataLiberacao}
+            >
+              {liberarMut.isPending ? 'Confirmando...' : 'Confirmar e ativar contrato'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

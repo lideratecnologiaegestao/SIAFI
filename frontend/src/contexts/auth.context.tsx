@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import api, { tokenStore } from '@/lib/api'
 import { getSupabaseBrowserClient } from '@/lib/supabase/client'
 
-export type UserRole = 'admin' | 'financeiro' | 'caixa' | 'usuario' | 'cliente'
+export type UserRole = 'admin' | 'financeiro' | 'consultor' | 'caixa' | 'cliente'
 
 export interface AuthUser {
   id: number
@@ -17,7 +17,7 @@ interface AuthContextValue {
   user: AuthUser | null
   isLoading: boolean
   isAuthenticated: boolean
-  login: (credentials: { username: string; password: string }) => Promise<{ needsMfa?: boolean }>
+  login: (credentials: { identificador: string; password: string }) => Promise<{ needsMfa?: boolean; setupMfaRequired?: boolean; role?: UserRole }>
   loginWithGoogle: () => Promise<void>
   completeMfa: (aal2Token: string) => Promise<void>
   logout: () => Promise<void>
@@ -99,22 +99,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true }
   }, [])
 
-  async function login(credentials: { username: string; password: string }) {
+  async function login(credentials: { identificador: string; password: string }) {
     const { data } = await api.post<{
       accessToken: string
       user: AuthUser
       needsMfa?: boolean
+      setupMfaRequired?: boolean
     }>('/auth/login', credentials)
 
     tokenStore.set(data.accessToken)
 
     if (data.needsMfa) {
-      // Don't set user yet — MFA verification required first
       return { needsMfa: true }
     }
 
+    if (data.setupMfaRequired) {
+      setUser(data.user)
+      return { setupMfaRequired: true }
+    }
+
     setUser(data.user)
-    return {}
+    return { role: data.user.role }
   }
 
   async function completeMfa(aal2Token: string) {

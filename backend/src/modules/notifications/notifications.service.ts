@@ -72,7 +72,7 @@ export class NotificationsService {
       clienteEmail: client.email ?? undefined,
       installmentId,
       loanId: installment.loanId,
-      valorParcela: Number(installment.valor),
+      valorParcela: Number(installment.installmentAmount),
       dataVencimento: dtVenc,
     };
 
@@ -106,7 +106,7 @@ export class NotificationsService {
         clienteWhatsapp: client.whatsapp,
         installmentId,
         loanId: installment.loanId,
-        valorParcela: Number(installment.valor),
+        valorParcela: Number(installment.installmentAmount),
       },
       { jobId: `cobranca-${installmentId}-${new Date().toISOString().split('T')[0]}` },
     );

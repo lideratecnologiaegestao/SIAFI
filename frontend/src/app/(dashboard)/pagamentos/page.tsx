@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, Search, RefreshCw, Wallet, Undo2 } from 'lucide-react'
+import { Plus, Search, RefreshCw, Wallet, Undo2, FileDown } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -91,11 +91,21 @@ export default function PagamentosPage() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{formatDate(p.dataPagamento)}</td>
                       <td className="px-4 py-3 text-right">
-                        {canEstornar && (
-                          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={() => handleEstorno(p.id)} disabled={estornoMut.isPending}>
-                            <Undo2 className="size-3" />Estornar
-                          </Button>
-                        )}
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={async () => {
+                            const res = await api.get(`/export/pagamentos/${p.id}/recibo`, { responseType: 'blob' })
+                            const a = document.createElement('a')
+                            a.href = URL.createObjectURL(new Blob([res.data as BlobPart], { type: 'application/pdf' }))
+                            a.download = `recibo-${p.id}.pdf`
+                            a.click()
+                            URL.revokeObjectURL(a.href)
+                          }}><FileDown className="size-3" />Recibo</Button>
+                          {canEstornar && (
+                            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={() => handleEstorno(p.id)} disabled={estornoMut.isPending}>
+                              <Undo2 className="size-3" />Estornar
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIAFI — Fluxograma de Empréstimos</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f5f3;
+    color: #1a1a18;
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    color: #1a1a18;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: #73726c;
+    margin-bottom: 24px;
+  }
+
+  .scroll-wrap {
+    overflow-x: auto;
+    overflow-y: auto;
+    border: 0.5px solid #d3d1c7;
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 24px;
+    max-height: 90vh;
+  }
+
+  .canvas {
+    position: relative;
+    width: 1400px;
+    height: 1880px;
+  }
+
+  .node {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border-radius: 8px;
+    border: 0.5px solid;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s;
+    user-select: none;
+  }
+  .node:hover { opacity: .85; transform: translateY(-1px); }
+  .node:active { transform: scale(.98); }
+
+  .node-title { font-size: 13px; font-weight: 500; line-height: 1.3; }
+  .node-sub   { font-size: 11px; line-height: 1.3; margin-top: 3px; }
+
+  .w140 { width: 140px; }
+  .w200 { width: 200px; height: 56px; }
+  .w240 { width: 240px; height: 56px; }
+  .pill { border-radius: 22px; height: 40px; }
+
+  .purple { background: #EEEDFE; border-color: #534AB7; color: #3C3489; }
+  .purple .node-sub { color: #534AB7; }
+  .teal   { background: #E1F5EE; border-color: #0F6E56; color: #085041; }
+  .teal .node-sub   { color: #0F6E56; }
+  .green  { background: #EAF3DE; border-color: #3B6D11; color: #27500A; }
+  .green .node-sub  { color: #3B6D11; }
+  .red    { background: #FCEBEB; border-color: #A32D2D; color: #791F1F; }
+  .red .node-sub    { color: #A32D2D; }
+  .amber  { background: #FAEEDA; border-color: #854F0B; color: #633806; }
+  .amber .node-sub  { color: #854F0B; }
+  .gray   { background: #F1EFE8; border-color: #888780; color: #444441; }
+  .gray .node-sub   { color: #5F5E5A; }
+
+  .diamond {
+    position: absolute;
+    width: 140px;
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: opacity .15s;
+  }
+  .diamond:hover { opacity: .85; }
+  .diamond-shape {
+    position: absolute;
+    width: 100px;
+    height: 100px;
+    transform: rotate(45deg);
+    border-radius: 6px;
+    background: #FAEEDA;
+    border: 0.5px solid #854F0B;
+  }
+  .diamond-label {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    color: #633806;
+    line-height: 1.3;
+    pointer-events: none;
+    padding: 0 10px;
+  }
+
+  svg.lines {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1400px;
+    height: 1880px;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .edge-label {
+    position: absolute;
+    font-size: 11px;
+    font-weight: 500;
+    pointer-events: none;
+  }
+
+  .info-box {
+    position: absolute;
+    padding: 10px 14px;
+    background: #F1EFE8;
+    border-radius: 8px;
+    border: 0.5px solid #d3d1c7;
+    font-size: 11px;
+    color: #5F5E5A;
+    line-height: 1.7;
+  }
+  .info-box strong {
+    display: block;
+    font-size: 12px;
+    color: #1a1a18;
+    margin-bottom: 2px;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #5F5E5A;
+  }
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 0.5px solid;
+    flex-shrink: 0;
+  }
+
+  .tooltip {
+    display: none;
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #2C2C2A;
+    color: #F1EFE8;
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    pointer-events: none;
+    z-index: 100;
+    white-space: nowrap;
+  }
+  .tooltip.show { display: block; }
+</style>
+</head>
+<body>
+
+<h1>SIAFI — Fluxograma de Empréstimos</h1>
+<p class="subtitle">Lidera Tecnologia e Gestão · Clique em qualquer etapa para ver detalhes</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#EEEDFE;border-color:#534AB7"></div> Cadastro do cliente</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#FAEEDA;border-color:#854F0B"></div> Decisão / SLA</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#EAF3DE;border-color:#3B6D11"></div> Aprovação / Pagamento</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#FCEBEB;border-color:#A32D2D"></div> Rejeição / Inadimplência</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#E1F5EE;border-color:#0F6E56"></div> Parcelas</div>
+  <div class="legend-item">
+    <svg width="32" height="12"><line x1="0" y1="6" x2="32" y2="6" stroke="#888" stroke-width="1" stroke-dasharray="4 3"/></svg>
+    Retorno ao ciclo
+  </div>
+</div>
+
+<div class="scroll-wrap">
+<div class="canvas">
+
+<!-- SVG LINHAS -->
+<svg class="lines">
+<defs>
+  <marker id="arr-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="arr-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="arr-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#854F0B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#3B6D11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="arr-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#E24B4A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- coluna central: início até análise do financeiro -->
+<line x1="700" y1="80"  x2="700" y2="118" stroke="#888780" stroke-width="1" marker-end="url(#arr-gray)"/>
+<line x1="700" y1="194" x2="700" y2="232" stroke="#534AB7" stroke-width="1" marker-end="url(#arr-purple)"/>
+<line x1="700" y1="308" x2="700" y2="346" stroke="#534AB7" stroke-width="1" marker-end="url(#arr-purple)"/>
+<line x1="700" y1="422" x2="700" y2="460" stroke="#534AB7" stroke-width="1" marker-end="url(#arr-purple)"/>
+<line x1="700" y1="536" x2="700" y2="574" stroke="#854F0B" stroke-width="1" marker-end="url(#arr-amber)"/>
+<line x1="700" y1="650" x2="700" y2="710" stroke="#888780" stroke-width="1" marker-end="url(#arr-gray)"/>
+
+<!-- centro para losango aprovação -->
+<line x1="700" y1="806" x2="700" y2="840" stroke="#888780" stroke-width="1" marker-end="url(#arr-gray)"/>
+
+<!-- losango → rejeição (esquerda) -->
+<line x1="630" y1="910" x2="310" y2="910" stroke="#E24B4A" stroke-width="1" marker-end="url(#arr-red)"/>
+<text x="470" y="903" font-size="11" font-weight="500" fill="#A32D2D" text-anchor="middle">Não</text>
+
+<!-- losango → aprovação (direita) -->
+<line x1="770" y1="910" x2="1090" y2="910" stroke="#3B6D11" stroke-width="1" marker-end="url(#arr-green)"/>
+<text x="930" y="903" font-size="11" font-weight="500" fill="#3B6D11" text-anchor="middle">Sim</text>
+
+<!-- coluna rejeição -->
+<line x1="180" y1="958" x2="180" y2="996" stroke="#E24B4A" stroke-width="1" marker-end="url(#arr-red)"/>
+<line x1="180" y1="1072" x2="180" y2="1110" stroke="#E24B4A" stroke-width="1" marker-end="url(#arr-red)"/>
+
+<!-- coluna aprovação -->
+<line x1="1210" y1="958"  x2="1210" y2="996"  stroke="#3B6D11" stroke-width="1" marker-end="url(#arr-green)"/>
+<line x1="1210" y1="1072" x2="1210" y2="1110" stroke="#3B6D11" stroke-width="1" marker-end="url(#arr-green)"/>
+<line x1="1210" y1="1186" x2="1210" y2="1224" stroke="#3B6D11" stroke-width="1" marker-end="url(#arr-green)"/>
+<line x1="1210" y1="1300" x2="1210" y2="1338" stroke="#3B6D11" stroke-width="1" marker-end="url(#arr-green)"/>
+<line x1="1210" y1="1414" x2="1210" y2="1452" stroke="#3B6D11" stroke-width="1" marker-end="url(#arr-green)"/>
+
+<!-- losango parcelas → pago (direita) -->
+<line x1="1280" y1="1522" x2="1380" y2="1522" stroke="#3B6D11" stroke-width="1"/>
+<line x1="1380" y1="1522" x2="1380" y2="1620" stroke="#3B6D11" stroke-width="1"/>
+<line x1="1380" y1="1620" x2="1330" y2="1620" stroke="#3B6D11" stroke-width="1" marker-end="url(#arr-green)"/>
+<text x="1390" y="1575" font-size="11" font-weight="500" fill="#3B6D11">Sim</text>
+
+<!-- losango parcelas → não pago (esquerda, para atraso) -->
+<line x1="1140" y1="1522" x2="700" y2="1522" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#arr-gray)"/>
+<text x="920"  y="1513" font-size="11" fill="#888780" text-anchor="middle">Não · próxima parcela</text>
+<line x1="700"  y1="1522" x2="700" y2="1500" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<line x1="700"  y1="1500" x2="700" y2="1452" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#arr-gray)"/>
+
+<!-- coluna inadimplência -->
+<line x1="180" y1="1150" x2="180" y2="1188" stroke="#E24B4A" stroke-width="1" marker-end="url(#arr-red)"/>
+<line x1="180" y1="1264" x2="180" y2="1302" stroke="#854F0B" stroke-width="1" marker-end="url(#arr-amber)"/>
+<line x1="180" y1="1378" x2="180" y2="1416" stroke="#854F0B" stroke-width="1" marker-end="url(#arr-amber)"/>
+<line x1="180" y1="1492" x2="180" y2="1530" stroke="#854F0B" stroke-width="1" marker-end="url(#arr-amber)"/>
+<line x1="180" y1="1606" x2="180" y2="1644" stroke="#854F0B" stroke-width="1" marker-end="url(#arr-amber)"/>
+
+<!-- retorno do reparcelamento ao ciclo de parcelas -->
+<line x1="290" y1="1670" x2="700" y2="1670" stroke="#854F0B" stroke-width="0.5" stroke-dasharray="4 3"/>
+<line x1="700" y1="1670" x2="700" y2="1452" stroke="#854F0B" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#arr-amber)"/>
+<text x="480" y="1662" font-size="11" fill="#854F0B" text-anchor="middle">↻ volta ao ciclo de parcelas</text>
+
+<!-- ligar inadimplência com ciclo de parcelas (entrada lateral) -->
+<line x1="90"  y1="1116" x2="60"  y2="1116" stroke="#E24B4A" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="60"  y1="1116" x2="60"  y2="1452" stroke="#E24B4A" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="60"  y1="1452" x2="90"  y2="1452" stroke="#E24B4A" stroke-width="0.5" stroke-dasharray="3 3"/>
+</svg>
+
+<!-- NÓS -->
+
+<div class="node w140 pill gray" style="left:630px;top:40px"
+  data-info="Início do processo. O consultor identifica o cliente e abre o fluxo de cadastro no SIAFI.">
+  <span class="node-title">Início</span>
+</div>
+
+<div class="node w240 purple" style="left:580px;top:118px"
+  data-info="O consultor coleta nome completo, CPF, RG, data de nascimento, endereço, WhatsApp e comprovante de renda do cliente.">
+  <span class="node-title">Consultor coleta dados do cliente</span>
+  <span class="node-sub">Nome, CPF, RG, comprovante de renda</span>
+</div>
+
+<div class="node w240 purple" style="left:580px;top:232px"
+  data-info="Os documentos são enviados ao Supabase Storage no bucket client-documents (privado). Os paths são salvos nos campos fotoPath, rgPath e comprovantePath do cliente.">
+  <span class="node-title">Upload de documentos</span>
+  <span class="node-sub">Bucket client-documents · Supabase Storage</span>
+</div>
+
+<div class="node w240 purple" style="left:580px;top:346px"
+  data-info="O cliente é salvo na tabela clients com consultorId preenchido automaticamente com o ID do consultor logado. O consultor não pode alterar este vínculo depois.">
+  <span class="node-title">Cliente cadastrado</span>
+  <span class="node-sub">consultorId vinculado automaticamente</span>
+</div>
+
+<div class="node w240 purple" style="left:580px;top:460px"
+  data-info="O consultor registra a intenção de empréstimo informando valor solicitado, número de parcelas e finalidade. Status inicial: aguardando.">
+  <span class="node-title">Consultor registra intenção</span>
+  <span class="node-sub">Valor, parcelas, finalidade</span>
+</div>
+
+<div class="node w240 amber" style="left:580px;top:574px"
+  data-info="O sistema inicia o SLA de 24h (configurável). O financeiro é notificado via BullMQ. Uma conversa de contexto é criada automaticamente com todos os participantes.">
+  <span class="node-title">SLA iniciado · financeiro notificado</span>
+  <span class="node-sub">Conversa de contexto criada</span>
+</div>
+
+<div class="node w240 gray" style="left:580px;top:710px"
+  data-info="O financeiro analisa o score de risco interno do cliente (pontualidade, reparcelamentos, quitações), os documentos enviados e o valor solicitado.">
+  <span class="node-title">Financeiro analisa intenção</span>
+  <span class="node-sub">Score de risco · docs · valor</span>
+</div>
+
+<!-- Losango aprovação -->
+<div class="diamond" style="left:630px;top:836px"
+  data-info="O financeiro aprova ou rejeita a intenção de empréstimo. A rejeição exige motivo obrigatório (predefinido ou livre).">
+  <div class="diamond-shape"></div>
+  <div class="diamond-label">Aprovado?</div>
+</div>
+
+<!-- COLUNA REJEIÇÃO -->
+<div class="node w200 red" style="left:80px;top:882px"
+  data-info="A intenção é marcada como rejeitada. O motivo é registrado (score baixo, documentação incompleta, limite atingido, renda insuficiente ou outro). O consultor é notificado via BullMQ.">
+  <span class="node-title">Intenção rejeitada</span>
+  <span class="node-sub">Motivo obrigatório · consultor avisado</span>
+</div>
+
+<div class="node w200 red" style="left:80px;top:996px"
+  data-info="O consultor informa o cliente sobre a rejeição. O canal utilizado (sistema, WhatsApp ou presencial) é registrado no campo feedbackCanal com timestamp.">
+  <span class="node-title">Consultor informa o cliente</span>
+  <span class="node-sub">Canal registrado no sistema</span>
+</div>
+
+<div class="node w200 gray pill" style="left:80px;top:1110px"
+  data-info="O processo termina. O cliente pode solicitar uma nova intenção de empréstimo após resolver as pendências apontadas na rejeição.">
+  <span class="node-title">Fim · nova intenção possível</span>
+</div>
+
+<!-- COLUNA APROVAÇÃO -->
+<div class="node w240 green" style="left:1090px;top:882px"
+  data-info="O contrato (Loan) é gerado automaticamente com os dados da intenção aprovada. O split de parcela é calculado: principal_payback e net_gain por parcela. AuditLog com snapshot imutável.">
+  <span class="node-title">Contrato gerado (Loan)</span>
+  <span class="node-sub">Split calculado · AuditLog snapshot</span>
+</div>
+
+<div class="node w240 green" style="left:1090px;top:996px"
+  data-info="Se o cliente ainda não tem acesso ao portal, ele é ativado automaticamente: conta criada no Supabase Auth, senha temporária gerada com crypto.randomBytes, email e WhatsApp enviados.">
+  <span class="node-title">Portal do cliente ativado</span>
+  <span class="node-sub">Supabase Auth · senha temporária</span>
+</div>
+
+<div class="node w240 green" style="left:1090px;top:1110px"
+  data-info="O cliente faz login no portal e aceita formalmente as condições do contrato. O aceite é registrado com timestamp, IP e hash SHA-256 do documento — válido juridicamente.">
+  <span class="node-title">Aceite digital no portal</span>
+  <span class="node-sub">Timestamp + IP + hash SHA-256</span>
+</div>
+
+<div class="node w240 green" style="left:1090px;top:1224px"
+  data-info="O capital é entregue ao cliente. A saída é registrada como Transaction no caixa (tipo: saída, categoria: Liberação de Empréstimo).">
+  <span class="node-title">Capital liberado ao cliente</span>
+  <span class="node-sub">Saída registrada no caixa</span>
+</div>
+
+<div class="node w240 teal" style="left:1090px;top:1338px"
+  data-info="As parcelas são geradas automaticamente a partir de dataInicio, com intervalo mensal. Cada parcela já traz principal_payback e net_gain calculados com decimal.js, garantindo que a soma seja exatamente igual ao totalReceivable.">
+  <span class="node-title">Parcelas geradas automaticamente</span>
+  <span class="node-sub">principal_payback + net_gain por parcela</span>
+</div>
+
+<!-- Losango parcela paga -->
+<div class="diamond" style="left:1140px;top:1452px"
+  data-info="Na data de vencimento, o cron verifica se a parcela foi paga. O cliente pode pagar via PIX (webhook automático), boleto, dinheiro, cartão ou Mercado Pago.">
+  <div class="diamond-shape"></div>
+  <div class="diamond-label">Parcela<br>foi paga?</div>
+</div>
+
+<div class="node w240 green" style="left:1090px;top:1592px"
+  data-info="Quando todas as parcelas do contrato são quitadas, o Loan recebe status = quitado. O score de risco do cliente é recalculado (score de quitação sobe). AuditLog registrado.">
+  <span class="node-title">Contrato quitado</span>
+  <span class="node-sub">Status = quitado · score do cliente sobe</span>
+</div>
+
+<!-- COLUNA INADIMPLÊNCIA -->
+<div class="node w200 red" style="left:80px;top:1188px"
+  data-info="O cron diário das 08h marca a parcela como atrasada. O score de pontualidade do cliente cai proporcionalmente. Notificações de cobrança são enviadas via WhatsApp.">
+  <span class="node-title">Parcela em atraso</span>
+  <span class="node-sub">Cron 08h · score do cliente cai</span>
+</div>
+
+<div class="node w200 red" style="left:80px;top:1302px"
+  data-info="O cliente acessa o portal e solicita reparcelamento (novas condições) ou boleto atualizado (com multa e mora calculados). Informa a data prevista de pagamento.">
+  <span class="node-title">Cliente solicita no portal</span>
+  <span class="node-sub">Reparcelamento ou boleto atualizado</span>
+</div>
+
+<div class="node w200 amber" style="left:80px;top:1416px"
+  data-info="O financeiro usa o simulador interativo para definir novo principal, lucro alvo, número de parcelas e data de início. Multa (padrão 2%) e mora (padrão 0,033%/dia) são calculadas automaticamente.">
+  <span class="node-title">Financeiro define termos</span>
+  <span class="node-sub">Simulador · multa · mora</span>
+</div>
+
+<div class="node w200 amber" style="left:80px;top:1530px"
+  data-info="Em $transaction atômica: o contrato original tem status alterado para cancelado, todas as parcelas pendentes e atrasadas são canceladas, e o novo Loan é criado com origemLoanId referenciando o contrato cancelado.">
+  <span class="node-title">Contrato original cancelado</span>
+  <span class="node-sub">Novo loan com origem_loan_id</span>
+</div>
+
+<div class="node w200 amber" style="left:80px;top:1644px"
+  data-info="O cliente aceita as novas condições no portal (timestamp + IP + hash). As novas parcelas são geradas automaticamente e o ciclo de pagamento recomeça.">
+  <span class="node-title">Cliente aceita no portal</span>
+  <span class="node-sub">Novas parcelas geradas</span>
+</div>
+
+<!-- INFO BOX meios de pagamento -->
+<div class="info-box" style="left:840px;top:1188px;width:220px">
+  <strong>Meios de pagamento</strong>
+  PIX · Boleto · Dinheiro · Cartão<br>
+  Webhook MP · baixa automática<br>
+  Split registrado no caixa
+</div>
+
+</div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+  const tooltip = document.getElementById('tooltip');
+  let timer;
+
+  document.querySelectorAll('.node, .diamond').forEach(el => {
+    el.addEventListener('click', () => {
+      const info = el.getAttribute('data-info');
+      if (!info) return;
+      tooltip.textContent = info;
+      tooltip.classList.add('show');
+      clearTimeout(timer);
+      timer = setTimeout(() => tooltip.classList.remove('show'), 5000);
+    });
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.node') && !e.target.closest('.diamond')) {
+      tooltip.classList.remove('show');
+    }
+  });
+</script>
+
+</body>
+</html>

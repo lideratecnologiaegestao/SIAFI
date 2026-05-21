@@ -21,6 +21,12 @@ export class InstallmentsController {
     return this.installmentsService.findOverdue();
   }
 
+  @Get(':id/encargos')
+  @Roles('admin', 'financeiro', 'caixa')
+  getEncargos(@Param('id', ParseIntPipe) id: number) {
+    return this.installmentsService.getEncargos(id);
+  }
+
   @Get(':id')
   @Roles('admin', 'financeiro', 'caixa')
   findOne(@Param('id', ParseIntPipe) id: number) {

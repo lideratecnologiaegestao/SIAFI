@@ -7,6 +7,7 @@ import {
   Res,
   Body,
   Param,
+  Ip,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -20,6 +21,7 @@ import { UsersService } from '../users/users.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
+import { ValidateGoogleDto } from './dto/validate-google.dto';
 
 interface CurrentUserPayload {
   id: number;
@@ -38,8 +40,9 @@ export class AuthController {
 
   /**
    * POST /api/auth/login
-   * Validates credentials locally, then authenticates via Supabase Auth.
-   * Returns Supabase access_token + sets refresh_token as httpOnly cookie.
+   * Aceita username, e-mail ou CPF como identificador.
+   * Autentica localmente (bcrypt) + via Supabase Auth.
+   * Retorna Supabase access_token + seta refresh_token como httpOnly cookie.
    */
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -47,12 +50,24 @@ export class AuthController {
     @Body() body: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.login(body.username, body.password, res);
+    return this.authService.loginComEmailOuCpf(body.identificador, body.password, res);
+  }
+
+  /**
+   * POST /api/auth/validate-google
+   * Chamado pelo callback OAuth logo após exchangeCodeForSession.
+   * Verifica se o email está pré-cadastrado; se não, deleta a conta do Supabase e retorna 403.
+   * Não usa JwtAuthGuard — a sessão ainda não existe quando este endpoint é chamado.
+   */
+  @Post('validate-google')
+  @HttpCode(HttpStatus.OK)
+  async validateGoogle(@Body() dto: ValidateGoogleDto, @Ip() ip: string) {
+    return this.authService.validateGoogleOAuth(dto.email, dto.supabaseUserId, ip);
   }
 
   /**
    * POST /api/auth/refresh
-   * Uses Supabase to refresh the session from the httpOnly cookie.
+   * Renova a sessão via Supabase usando o httpOnly cookie.
    */
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
@@ -65,7 +80,7 @@ export class AuthController {
 
   /**
    * POST /api/auth/logout
-   * Revokes the Supabase session and clears the cookie.
+   * Revoga a sessão Supabase e limpa o cookie.
    */
   @UseGuards(JwtAuthGuard)
   @Post('logout')
@@ -81,7 +96,7 @@ export class AuthController {
 
   /**
    * GET /api/auth/me
-   * Returns the current user from Prisma (full data).
+   * Retorna dados do usuário autenticado.
    */
   @UseGuards(JwtAuthGuard)
   @Get('me')
@@ -91,11 +106,11 @@ export class AuthController {
     return { id: full.id, username: full.username, nome: full.nome, role: full.role };
   }
 
-  // ─── MFA ─────────────────────────────────────────────────────────────────────
+  // ─── MFA ─────────────────────────────────────────────────────────────────
 
   /**
    * GET /api/auth/mfa/factors
-   * Lists the authenticated user's MFA factors.
+   * Lista os fatores MFA do usuário autenticado.
    */
   @UseGuards(JwtAuthGuard)
   @Get('mfa/factors')
@@ -105,7 +120,7 @@ export class AuthController {
 
   /**
    * DELETE /api/auth/mfa/factors/:factorId
-   * Removes an MFA factor (admin action — resets MFA for the user).
+   * Remove um fator MFA (admin — reseta MFA do usuário).
    */
   @UseGuards(JwtAuthGuard)
   @Delete('mfa/factors/:factorId')
@@ -120,11 +135,14 @@ export class AuthController {
 
   /**
    * GET /api/auth/mfa/required
-   * Returns whether MFA is required for the authenticated user's role.
+   * Informa se MFA é obrigatório para a role do usuário autenticado.
    */
   @UseGuards(JwtAuthGuard)
   @Get('mfa/required')
   async mfaRequired(@CurrentUser() user: CurrentUserPayload) {
-    return { required: this.mfaService.roleRequiresMfa(user.role) };
+    return {
+      required: this.mfaService.roleRequiresMfa(user.role),
+      temPrazo: this.mfaService.roleTemPrazoMfa(user.role),
+    };
   }
 }

@@ -15,10 +15,10 @@ interface User {
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  admin: 'Administrador', financeiro: 'Financeiro', caixa: 'Caixa', usuario: 'Usuário', cliente: 'Cliente',
+  admin: 'Administrador', financeiro: 'Financeiro', consultor: 'Consultor', caixa: 'Caixa', cliente: 'Cliente',
 }
 const ROLE_VARIANT: Record<string, 'default' | 'secondary' | 'success' | 'warning' | 'outline'> = {
-  admin: 'default', financeiro: 'success', caixa: 'warning', usuario: 'outline', cliente: 'secondary',
+  admin: 'default', financeiro: 'success', consultor: 'secondary', caixa: 'warning', cliente: 'outline',
 }
 
 export default function UsuariosPage() {

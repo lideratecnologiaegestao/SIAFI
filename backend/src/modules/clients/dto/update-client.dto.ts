@@ -2,7 +2,9 @@ import {
   IsBoolean,
   IsDateString,
   IsEmail,
+  IsInt,
   IsOptional,
+  IsPositive,
   IsString,
   Length,
   Matches,
@@ -87,4 +89,9 @@ export class UpdateClientDto {
   @IsBoolean()
   @Transform(({ value }) => toBoolean(value))
   active?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  consultorId?: number | null;
 }

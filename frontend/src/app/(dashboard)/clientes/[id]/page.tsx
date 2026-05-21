@@ -1,15 +1,25 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Pencil, Phone, Mail, MapPin, FileText, CreditCard, FolderOpen, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Pencil, Phone, Mail, MapPin, FileText, CreditCard, FolderOpen, ExternalLink, UserCheck, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { formatCPF, formatPhone, formatDate, formatCEP, formatCurrency, STATUS_LOAN } from '@/lib/utils'
+import { useAuth } from '@/contexts/auth.context'
 import api from '@/lib/api'
+import { PortalCard } from '@/components/portal/portal-card'
+
+interface Consultor {
+  id: number
+  nome: string
+}
 
 interface Client {
   id: number; nome: string; cpf: string; rg: string; dataNascimento: string
@@ -17,6 +27,7 @@ interface Client {
   bairro: string; cidade: string; estado: string; cep: string
   active: boolean; observacoes: string; createdAt: string
   fotoPath?: string; rgPath?: string; comprovantePath?: string
+  consultor?: { id: number; nome: string } | null
   loans: Array<{ id: number; valor: number; numeroParcelas: number; status: string; dataInicio: string }>
 }
 
@@ -28,10 +39,32 @@ interface DocumentUrls {
 
 export default function ClienteDetalhePage() {
   const { id } = useParams()
+  const { user } = useAuth()
+  const qc = useQueryClient()
+  const [showVincular, setShowVincular] = useState(false)
+  const [selectedConsultorId, setSelectedConsultorId] = useState<string>('')
+
+  const canManage = user?.role === 'admin' || user?.role === 'financeiro'
 
   const { data: client, isLoading, isError } = useQuery({
     queryKey: ['clients', id],
     queryFn: () => api.get<Client>(`/clients/${id}`).then((r) => r.data),
+  })
+
+  const { data: consultores } = useQuery<Consultor[]>({
+    queryKey: ['consultores'],
+    queryFn: () => api.get<Consultor[]>('/clients/consultores').then((r) => r.data),
+    enabled: canManage && showVincular,
+  })
+
+  const vincularMut = useMutation({
+    mutationFn: (consultorId: number | null) =>
+      api.patch(`/clients/${id}/vincular-consultor`, { consultorId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['clients', id] })
+      setShowVincular(false)
+      setSelectedConsultorId('')
+    },
   })
 
   const hasDocuments = !!(client?.fotoPath || client?.rgPath || client?.comprovantePath)
@@ -93,6 +126,27 @@ export default function ClienteDetalhePage() {
             {client.whatsapp && <div className="flex justify-between"><span className="text-muted-foreground">WhatsApp</span><span className="font-medium">{formatPhone(client.whatsapp)}</span></div>}
             {client.telefone && <div className="flex justify-between"><span className="text-muted-foreground">Telefone</span><span className="font-medium">{formatPhone(client.telefone)}</span></div>}
             {client.email && <div className="flex justify-between items-center"><span className="text-muted-foreground">E-mail</span><span className="font-medium flex items-center gap-1"><Mail className="size-3" />{client.email}</span></div>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2"><UserCheck className="size-4" />Consultor</CardTitle>
+              {canManage && (
+                <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => { setShowVincular(true); setSelectedConsultorId(client.consultor ? String(client.consultor.id) : '') }}>
+                  <Pencil className="size-3" />
+                  {client.consultor ? 'Alterar' : 'Vincular'}
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="text-sm">
+            {client.consultor ? (
+              <p className="font-medium">{client.consultor.nome}</p>
+            ) : (
+              <p className="text-muted-foreground">Nenhum consultor vinculado</p>
+            )}
           </CardContent>
         </Card>
 
@@ -163,7 +217,49 @@ export default function ClienteDetalhePage() {
             <CardContent><p className="text-sm text-muted-foreground whitespace-pre-wrap">{client.observacoes}</p></CardContent>
           </Card>
         )}
+
+        <PortalCard
+          clientId={client.id}
+          clienteNome={client.nome}
+          clienteEmail={client.email ?? null}
+        />
       </div>
+
+      {showVincular && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-base">Vincular Consultor</h2>
+              <button onClick={() => setShowVincular(false)}>
+                <X className="size-4 text-muted-foreground hover:text-foreground" />
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Consultor</Label>
+              <Select
+                value={selectedConsultorId}
+                onChange={(e) => setSelectedConsultorId(e.target.value)}
+                className="w-full"
+              >
+                <option value="">Sem consultor</option>
+                {consultores?.map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.nome}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setShowVincular(false)}>Cancelar</Button>
+              <Button
+                size="sm"
+                onClick={() => vincularMut.mutate(selectedConsultorId ? Number(selectedConsultorId) : null)}
+                disabled={vincularMut.isPending}
+              >
+                {vincularMut.isPending ? 'Salvando...' : 'Confirmar'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {client.loans && client.loans.length > 0 && (
         <Card>

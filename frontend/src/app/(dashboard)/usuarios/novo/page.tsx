@@ -18,7 +18,7 @@ const schema = z.object({
   nome: z.string().min(3, 'Nome deve ter ao menos 3 caracteres'),
   username: z.string().min(3, 'Username deve ter ao menos 3 caracteres').regex(/^[a-z0-9_.]+$/, 'Use apenas letras minúsculas, números, . e _'),
   password: z.string().min(8, 'Senha deve ter ao menos 8 caracteres'),
-  role: z.enum(['admin', 'financeiro', 'caixa', 'usuario', 'cliente']),
+  role: z.enum(['admin', 'financeiro', 'consultor', 'caixa', 'cliente']),
 })
 type FormData = z.infer<typeof schema>
 
@@ -28,7 +28,7 @@ export default function NovoUsuarioPage() {
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
-    defaultValues: { role: 'usuario' },
+    defaultValues: { role: 'caixa' },
   })
 
   const mutation = useMutation({
@@ -74,8 +74,8 @@ export default function NovoUsuarioPage() {
             <div className="space-y-1.5">
               <Label>Perfil de Acesso *</Label>
               <Select {...register('role')}>
-                <option value="usuario">Usuário (somente visualização)</option>
                 <option value="caixa">Caixa (pagamentos e clientes)</option>
+                <option value="consultor">Consultor (carteira de clientes)</option>
                 <option value="financeiro">Financeiro (operacional completo)</option>
                 <option value="admin">Administrador (acesso total)</option>
                 <option value="cliente">Cliente (portal do cliente)</option>

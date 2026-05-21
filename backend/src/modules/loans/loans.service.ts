@@ -2,42 +2,35 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { AmortizationType, LoanStatus, Prisma } from '@prisma/client';
+import { LoanStatus, Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import Decimal from 'decimal.js';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaginatedResponse, paginate } from '../../common/dto/paginated-response.dto';
-import { CalculatorFactory } from './domain/calculators/calculator.factory';
-import { InstallmentSchedule } from './domain/interfaces/installment-calculator.interface';
+import { addMonthsSafe, calcularDataVencimento } from '../../common/utils/date.utils';
 import { CreateLoanDto } from './dto/create-loan.dto';
 import { LoanFilterDto } from './dto/loan-filter.dto';
 
 // Precisão financeira global — 20 dígitos significativos, arredondamento "meio acima"
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
-// ─── Tipos internos ──────────────────────────────────────────────────────────
-
 interface RequestContext {
   userId?: number;
   ip?: string;
   userAgent?: string;
+  loanStatus?: LoanStatus;   // padrão: 'ativo'; use 'aguardando_aceite' quando chamado via IntencaoService
+  aceiteExpiraEm?: Date;     // apenas quando loanStatus = 'aguardando_aceite'
 }
-
-interface ScheduleResult {
-  taxaMensal: Decimal;
-  schedule: InstallmentSchedule[];
-}
-
-// ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class LoansService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // ─── Queries ──────────────────────────────────────────────────────────────
+  // ─── Queries ────────────────────────────────────────────────────────────────
 
   async findAll(filters: LoanFilterDto): Promise<PaginatedResponse<unknown>> {
     const { page, limit, search, status, clientId } = filters;
@@ -78,6 +71,7 @@ export class LoansService {
             riskLevel: true,
           },
         },
+        consultor: { select: { id: true, nome: true } },
         installments: { orderBy: { numero: 'asc' } },
       },
     });
@@ -96,7 +90,7 @@ export class LoansService {
       this.prisma.loan.count({ where: { status: 'quitado' } }),
       this.prisma.installment.aggregate({
         where: { status: { in: ['pendente', 'atrasado'] } },
-        _sum: { valor: true },
+        _sum: { installmentAmount: true },
       }),
       this.prisma.payment.aggregate({
         where: {
@@ -110,80 +104,123 @@ export class LoansService {
     return {
       totalAtivos,
       totalQuitados,
-      // Mantemos como string para preservar precisão decimal na serialização JSON
-      valorEmCarteira: new Decimal((carteiraResult._sum?.valor ?? '0').toString()).toFixed(2),
-      valorRecebidoMes: new Decimal((recebidoMesResult._sum?.valorPago ?? '0').toString()).toFixed(2),
+      valorEmCarteira: new Decimal(
+        (carteiraResult._sum?.installmentAmount ?? '0').toString(),
+      ).toFixed(2),
+      valorRecebidoMes: new Decimal(
+        (recebidoMesResult._sum?.valorPago ?? '0').toString(),
+      ).toFixed(2),
     };
   }
 
-  // ─── Commands ─────────────────────────────────────────────────────────────
+  // ─── Commands ───────────────────────────────────────────────────────────────
 
-  /**
-   * Cria um empréstimo com todas as suas parcelas em uma única transação atômica.
-   *
-   * Garante que nunca existirá um Loan sem Installments no banco de dados.
-   */
   async create(dto: CreateLoanDto, ctx: RequestContext = {}): Promise<unknown> {
     const client = await this.prisma.client.findUnique({ where: { id: dto.clientId } });
     if (!client) throw new NotFoundException(`Cliente ${dto.clientId} não encontrado`);
     if (!client.active) throw new BadRequestException('Cliente inativo não pode contrair empréstimos');
 
-    this.assertRateOrInstallmentProvided(dto);
+    const principal = new Decimal(dto.principalAmount);
+    const profit    = new Decimal(dto.targetProfit);
+    const n         = dto.numeroParcelas;
+    const total     = principal.plus(profit);
 
-    const tipoAmortizacao = dto.tipoAmortizacao ?? AmortizationType.simples;
-    const { taxaMensal, schedule } = this.buildSchedule(dto, tipoAmortizacao);
-    const taxaJurosDecimal = taxaMensal.times(100).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+    if (principal.lte(0)) throw new BadRequestException('principalAmount deve ser positivo.');
+    if (profit.lt(0))     throw new BadRequestException('targetProfit não pode ser negativo.');
+
+    // ── Cálculo base de cada parcela (floor para evitar exceder o total) ────
+    const baseInstallment = total.dividedBy(n).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+    const basePrincipal   = principal.dividedBy(n).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+    const baseGain        = profit.dividedBy(n).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+
+    // ── Ajustes de centavos para a última parcela ───────────────────────────
+    const ajusteInstallment = total.minus(baseInstallment.times(n));
+    const ajustePrincipal   = principal.minus(basePrincipal.times(n));
+    const ajusteGain        = profit.minus(baseGain.times(n));
+
+    // Verificação de integridade: ajusteInstallment = ajustePrincipal + ajusteGain
+    if (!ajustePrincipal.plus(ajusteGain).equals(ajusteInstallment)) {
+      throw new InternalServerErrorException(
+        'Erro de integridade no cálculo de split: ajuste de centavos inconsistente.',
+      );
+    }
+
+    // ── Geração das parcelas ────────────────────────────────────────────────
+    const installments = Array.from({ length: n }, (_, i) => {
+      const isUltima       = i === n - 1;
+      const installAmt     = isUltima ? baseInstallment.plus(ajusteInstallment) : baseInstallment;
+      const principalPay   = isUltima ? basePrincipal.plus(ajustePrincipal)     : basePrincipal;
+      const gain           = isUltima ? baseGain.plus(ajusteGain)               : baseGain;
+
+      if (!installAmt.equals(principalPay.plus(gain))) {
+        throw new InternalServerErrorException(
+          `Invariante violada na parcela ${i + 1}: ` +
+          `${installAmt} !== ${principalPay} + ${gain}`,
+        );
+      }
+
+      const amt = installAmt.toDecimalPlaces(2).toNumber();
+      return {
+        numero:            i + 1,
+        installmentAmount: amt,
+        principalPayback:  principalPay.toDecimalPlaces(2).toNumber(),
+        netGain:           gain.toDecimalPlaces(2).toNumber(),
+        dataVencimento:    calcularDataVencimento(new Date(dto.dataInicio), i + 1, dto.diaVencimento),
+        status:            'pendente' as const,
+        totalPago:         0,
+        saldoDevedor:      amt,
+        valorMulta:        0,
+        valorMora:         0,
+      };
+    });
 
     const created = await this.prisma.$transaction(async (tx) => {
       const loan = await tx.loan.create({
         data: {
-          clientId: dto.clientId,
-          valor: new Decimal(dto.valor).toNumber(),
-          valorInvestido: dto.valorInvestido ? new Decimal(dto.valorInvestido).toNumber() : null,
-          taxaJuros: taxaJurosDecimal.toNumber(),
-          modoTaxa: dto.modoTaxa ?? 'mensal',
-          tipoAmortizacao,
-          numeroParcelas: dto.numeroParcelas,
-          dataInicio: new Date(dto.dataInicio),
-          taxaMulta: dto.taxaMulta ?? 2.0,
-          taxaMora: dto.taxaMora ?? 1.0,
-          periodoCarencia: dto.periodoCarencia ?? 0,
-          metodoPagamento: dto.metodoPagamento ?? null,
-          observacoes: dto.observacoes ?? null,
-          status: 'ativo',
+          clientId:                dto.clientId,
+          consultorId:             ctx.userId ?? null,
+          principalAmount:         principal.toDecimalPlaces(2).toNumber(),
+          targetProfit:            profit.toDecimalPlaces(2).toNumber(),
+          totalReceivable:         total.toDecimalPlaces(2).toNumber(),
+          numeroParcelas:          n,
+          metodoPagamento:         dto.metodoPagamento ?? null,
+          dataInicio:              new Date(dto.dataInicio),
+          observacoes:             dto.observacoes ?? null,
+          status:                  ctx.loanStatus ?? 'ativo',
+          aceiteExpiraEm:          ctx.aceiteExpiraEm ?? null,
+          diaVencimento:           dto.diaVencimento ?? null,
+          multaPercentual:         dto.multaPercentual ?? null,
+          moraDiariaPercentual:    dto.moraDiariaPercentual ?? null,
+          diasAntecedenciaCobranca: dto.diasAntecedenciaCobranca ?? 10,
+          cobrarWhatsapp:          dto.cobrarWhatsapp ?? true,
+          cobrarEmail:             dto.cobrarEmail ?? true,
+          cobrarPortal:            dto.cobrarPortal ?? true,
         },
       });
 
       await tx.installment.createMany({
-        data: schedule.map((s) => ({
-          loanId: loan.id,
-          numero: s.numero,
-          valor: s.valor.toNumber(),
-          valorPrincipal: s.valorPrincipal.toNumber(),
-          valorJuros: s.valorJuros.toNumber(),
-          saldoDevedor: s.saldoDevedor.toNumber(),
-          dataVencimento: s.dataVencimento,
-          status: 'pendente' as const,
-          totalPago: 0,
-        })),
+        data: installments.map((inst) => ({ ...inst, loanId: loan.id })),
       });
 
       await this.writeAuditLog(tx, {
         ...ctx,
-        acao: 'LOAN_CREATED',
-        entidade: 'Loan',
+        acao:       'LOAN_CREATED',
+        entidade:   'Loan',
         entidadeId: loan.id,
         dadosAntes: null,
         dadosDepois: {
-          loanId: loan.id,
-          clientId: loan.clientId,
-          valor: loan.valor.toString(),
-          tipoAmortizacao,
-          numeroParcelas: loan.numeroParcelas,
-          taxaJuros: taxaJurosDecimal.toFixed(4),
-          totalParcelas: schedule.length,
-          primeiraParcela: schedule[0]?.dataVencimento,
-          ultimaParcela: schedule[schedule.length - 1]?.dataVencimento,
+          loanId:           loan.id,
+          clientId:         loan.clientId,
+          principalAmount:  principal.toString(),
+          targetProfit:     profit.toString(),
+          totalReceivable:  total.toString(),
+          numeroParcelas:   n,
+          baseInstallment:  baseInstallment.toString(),
+          basePrincipal:    basePrincipal.toString(),
+          baseGain:         baseGain.toString(),
+          ajusteInstallment: ajusteInstallment.toString(),
+          primeiraParcela:  installments[0]?.dataVencimento,
+          ultimaParcela:    installments[installments.length - 1]?.dataVencimento,
         },
       });
 
@@ -193,20 +230,12 @@ export class LoansService {
     return this.findById(created.id);
   }
 
-  /**
-   * Cancela um empréstimo e todas as suas parcelas pendentes/atrasadas atomicamente.
-   * Lança ConflictException se o empréstimo já está cancelado ou quitado.
-   */
   async cancel(id: number, ctx: RequestContext = {}): Promise<unknown> {
     const loan = await this.prisma.loan.findUnique({ where: { id } });
     if (!loan) throw new NotFoundException(`Empréstimo ${id} não encontrado`);
 
-    if (loan.status === 'cancelado') {
-      throw new ConflictException('Empréstimo já está cancelado');
-    }
-    if (loan.status === 'quitado') {
-      throw new ConflictException('Empréstimo quitado não pode ser cancelado');
-    }
+    if (loan.status === 'cancelado') throw new ConflictException('Empréstimo já está cancelado');
+    if (loan.status === 'quitado')   throw new ConflictException('Empréstimo quitado não pode ser cancelado');
 
     const snapshotAntes = this.serializeLoan(loan);
 
@@ -220,10 +249,10 @@ export class LoansService {
 
       await this.writeAuditLog(tx, {
         ...ctx,
-        acao: 'LOAN_CANCELLED',
-        entidade: 'Loan',
+        acao:       'LOAN_CANCELLED',
+        entidade:   'Loan',
         entidadeId: id,
-        dadosAntes: snapshotAntes,
+        dadosAntes:  snapshotAntes,
         dadosDepois: { ...snapshotAntes, status: 'cancelado' },
       });
     });
@@ -231,70 +260,143 @@ export class LoansService {
     return this.findById(id);
   }
 
-  // ─── Private: Business Logic ──────────────────────────────────────────────
+  // ─── Liberações pendentes ────────────────────────────────────────────────────
 
-  private assertRateOrInstallmentProvided(dto: CreateLoanDto): void {
-    const hasRate = dto.taxaJuros !== undefined && dto.taxaJuros !== null;
-    const hasInstallment = dto.valorParcela !== undefined && dto.valorParcela !== null && dto.valorParcela > 0;
-
-    if (!hasRate && !hasInstallment) {
-      throw new BadRequestException(
-        'Informe taxaJuros (%) ou valorParcela (R$). Pelo menos um é obrigatório.',
-      );
-    }
+  async findPendentesLiberacao(): Promise<unknown[]> {
+    return this.prisma.loan.findMany({
+      where: { status: 'aguardando_liberacao' },
+      include: {
+        client: { select: { id: true, nome: true, nomeSocial: true } },
+      },
+      orderBy: { aceiteClienteEm: 'asc' },
+    });
   }
 
-  private buildSchedule(dto: CreateLoanDto, tipoAmortizacao: AmortizationType): ScheduleResult {
-    const principal = new Decimal(dto.valor);
-    let taxaMensal: Decimal;
+  // ─── Liberação manual de capital ────────────────────────────────────────────
 
-    if (dto.valorParcela && dto.valorParcela > 0) {
-      // valorParcela direto só faz sentido para Juros Simples.
-      // Price/SAC precisariam de Newton-Raphson para inverter o PMT — não implementado.
-      if (tipoAmortizacao !== AmortizationType.simples) {
-        throw new BadRequestException(
-          'valorParcela direto só é compatível com tipoAmortizacao=simples. ' +
-            'Para Price ou SAC, informe taxaJuros.',
-        );
-      }
-
-      const totalRecebido = new Decimal(dto.valorParcela).times(dto.numeroParcelas);
-      const totalJuros = totalRecebido.minus(principal);
-
-      if (totalJuros.isNegative()) {
-        throw new BadRequestException(
-          'valorParcela × numeroParcelas deve ser maior que o valor do empréstimo.',
-        );
-      }
-
-      // Taxa mensal implícita pelo método dos juros simples
-      taxaMensal = principal.isZero()
-        ? new Decimal(0)
-        : totalJuros.dividedBy(principal).dividedBy(dto.numeroParcelas);
-    } else {
-      const taxaBruta = new Decimal(dto.taxaJuros ?? 0).dividedBy(100);
-      taxaMensal =
-        dto.modoTaxa === 'anual'
-          ? taxaBruta.plus(1).pow(new Decimal(1).dividedBy(12)).minus(1)
-          : taxaBruta;
-    }
-
-    if (taxaMensal.isNegative()) {
-      throw new BadRequestException('Taxa de juros não pode ser negativa.');
-    }
-
-    const calculator = CalculatorFactory.create(tipoAmortizacao);
-    const schedule = calculator.calculate({
-      principal,
-      taxaMensal,
-      numeroParcelas: dto.numeroParcelas,
-      dataInicio: new Date(dto.dataInicio),
+  async liberarCapital(
+    loanId: number,
+    dto: { metodoLiberacao: string; dataLiberacao?: string; observacao?: string },
+    ctx: RequestContext = {},
+  ): Promise<unknown> {
+    const loan = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: { client: { select: { id: true, nome: true, whatsapp: true } } },
     });
 
-    return { taxaMensal, schedule };
+    if (!loan) throw new NotFoundException(`Empréstimo ${loanId} não encontrado`);
+    if (loan.status !== 'aguardando_liberacao') {
+      throw new BadRequestException('Contrato não está aguardando liberação de capital.');
+    }
+
+    const dataLib = dto.dataLiberacao ? new Date(dto.dataLiberacao) : new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Ativar o contrato
+      await tx.loan.update({
+        where: { id: loanId },
+        data: {
+          status:          'ativo',
+          dataInicio:      dataLib,
+          liberadoPor:     ctx.userId ?? null,
+          liberadoEm:      dataLib,
+          metodoLiberacao: dto.metodoLiberacao,
+        },
+      });
+
+      // 2. Reajustar datas de vencimento das parcelas pendentes (data provisória → data real)
+      const installments = await tx.installment.findMany({
+        where:   { loanId, status: 'pendente' },
+        orderBy: { numero: 'asc' },
+        select:  { id: true, numero: true },
+      });
+      for (const inst of installments) {
+        await tx.installment.update({
+          where: { id: inst.id },
+          data:  { dataVencimento: addMonthsSafe(dataLib, inst.numero) },
+        });
+      }
+
+      // 3. Registrar saída no caixa
+      await tx.transaction.create({
+        data: {
+          tipo:      'saida',
+          valor:     loan.principalAmount,
+          descricao: `Liberação de capital — Contrato #${loanId} · ${loan.client.nome}${dto.observacao ? ` — ${dto.observacao}` : ''}`,
+          categoria: 'Liberação de Empréstimo',
+          data:      dataLib,
+          userId:    ctx.userId ?? null,
+        },
+      });
+
+      // 4. AuditLog
+      await this.writeAuditLog(tx, {
+        ...ctx,
+        acao:       'CAPITAL_LIBERADO',
+        entidade:   'Loan',
+        entidadeId: loanId,
+        dadosAntes:  { status: 'aguardando_liberacao' },
+        dadosDepois: {
+          status:          'ativo',
+          metodo:          dto.metodoLiberacao,
+          valor:           loan.principalAmount.toString(),
+          dataLib:         dataLib.toISOString(),
+          clientId:        loan.clientId,
+          parcelasAjustadas: installments.length,
+        },
+      });
+    });
+
+    return this.findById(loanId);
   }
 
-  // ─── Private: Audit ───────────────────────────────────────────────────────
+  // ─── Utilitário de integridade ───────────────────────────────────────────────
+
+  async verificarIntegridadeLoan(loanId: number): Promise<{
+    integro: boolean;
+    divergencias: string[];
+  }> {
+    const loan = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: { installments: true },
+    });
+
+    if (!loan) throw new NotFoundException(`Empréstimo ${loanId} não encontrado`);
+
+    const divergencias: string[] = [];
+    const total         = new Decimal(loan.totalReceivable.toString());
+    const principal     = new Decimal(loan.principalAmount.toString());
+    const profit        = new Decimal(loan.targetProfit.toString());
+
+    const somaInstallments = loan.installments.reduce(
+      (acc, i) => acc.plus(i.installmentAmount.toString()),
+      new Decimal(0),
+    );
+    const somaPrincipal = loan.installments.reduce(
+      (acc, i) => acc.plus(i.principalPayback.toString()),
+      new Decimal(0),
+    );
+    const somaGain = loan.installments.reduce(
+      (acc, i) => acc.plus(i.netGain.toString()),
+      new Decimal(0),
+    );
+
+    if (!total.equals(principal.plus(profit)))
+      divergencias.push(`totalReceivable (${total}) ≠ principalAmount + targetProfit (${principal.plus(profit)})`);
+
+    if (!somaInstallments.equals(total))
+      divergencias.push(`Soma installmentAmount (${somaInstallments}) ≠ totalReceivable (${total})`);
+
+    if (!somaPrincipal.equals(principal))
+      divergencias.push(`Soma principalPayback (${somaPrincipal}) ≠ principalAmount (${principal})`);
+
+    if (!somaGain.equals(profit))
+      divergencias.push(`Soma netGain (${somaGain}) ≠ targetProfit (${profit})`);
+
+    return { integro: divergencias.length === 0, divergencias };
+  }
+
+  // ─── Private: Audit ─────────────────────────────────────────────────────────
 
   private async writeAuditLog(
     tx: Prisma.TransactionClient,
@@ -308,23 +410,20 @@ export class LoansService {
   ): Promise<void> {
     const { userId, ip, userAgent, acao, entidade, entidadeId, dadosAntes, dadosDepois } = params;
 
-    // Hash SHA-256 para detecção de adulteração do log de auditoria
     const hash = createHash('sha256')
-      .update(
-        JSON.stringify({ userId, acao, entidade, entidadeId, dadosDepois, ts: Date.now() }),
-      )
+      .update(JSON.stringify({ userId, acao, entidade, entidadeId, dadosDepois, ts: Date.now() }))
       .digest('hex');
 
     await tx.auditLog.create({
       data: {
-        userId: userId ?? null,
+        userId:     userId ?? null,
         acao,
         entidade,
         entidadeId,
-        dadosAntes: (dadosAntes ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+        dadosAntes:  (dadosAntes ?? Prisma.JsonNull) as Prisma.InputJsonValue,
         dadosDepois: dadosDepois as Prisma.InputJsonValue,
         hash,
-        ip: ip ?? null,
+        ip:        ip ?? null,
         userAgent: userAgent ?? null,
       },
     });
@@ -332,10 +431,7 @@ export class LoansService {
 
   private serializeLoan(loan: Record<string, unknown>): Record<string, unknown> {
     return Object.fromEntries(
-      Object.entries(loan).map(([k, v]) => [
-        k,
-        v instanceof Decimal ? v.toString() : v,
-      ]),
+      Object.entries(loan).map(([k, v]) => [k, v instanceof Decimal ? v.toString() : v]),
     );
   }
 }

@@ -19,6 +19,10 @@ const ROUTE_ROLES: Array<{ prefix: string; roles: UserRole[] }> = [
   { prefix: '/conciliacao', roles: ['admin', 'financeiro'] },
   { prefix: '/inadimplentes', roles: ['admin', 'financeiro'] },
   { prefix: '/notificacoes', roles: ['admin', 'financeiro'] },
+  { prefix: '/consultor', roles: ['consultor'] },
+  { prefix: '/solicitacoes', roles: ['admin', 'financeiro', 'consultor'] },
+  { prefix: '/intencoes', roles: ['admin', 'financeiro', 'consultor'] },
+  { prefix: '/cobrancas', roles: ['admin', 'financeiro', 'consultor'] },
 ]
 
 function isAllowed(pathname: string, role: UserRole): boolean {
@@ -36,6 +40,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace('/login')
+      return
+    }
+    if (!isLoading && user?.role === 'cliente') {
+      router.replace('/portal')
       return
     }
     if (!isLoading && user && pathname && !isAllowed(pathname, user.role)) {

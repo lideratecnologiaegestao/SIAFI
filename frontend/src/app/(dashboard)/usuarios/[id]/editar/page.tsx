@@ -20,7 +20,7 @@ const schema = z.object({
   nome: z.string().min(3),
   username: z.string().min(3),
   password: z.string().min(8).optional().or(z.literal('')),
-  role: z.enum(['admin', 'financeiro', 'caixa', 'usuario', 'cliente']),
+  role: z.enum(['admin', 'financeiro', 'consultor', 'caixa', 'cliente']),
   active: z.boolean(),
 })
 type FormData = z.infer<typeof schema>
@@ -79,8 +79,8 @@ export default function EditarUsuarioPage() {
             <div className="space-y-1.5">
               <Label>Perfil *</Label>
               <Select {...register('role')}>
-                <option value="usuario">Usuário</option>
                 <option value="caixa">Caixa</option>
+                <option value="consultor">Consultor</option>
                 <option value="financeiro">Financeiro</option>
                 <option value="admin">Administrador</option>
                 <option value="cliente">Cliente</option>

@@ -3,15 +3,22 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { Plus, Search, RefreshCw, Eye, Pencil, Trash2, Users } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Plus, Search, RefreshCw, Eye, Pencil, Trash2, Users, UserCheck, X } from 'lucide-react'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import { formatCPF, formatPhone, formatDate } from '@/lib/utils'
+import { useAuth } from '@/contexts/auth.context'
 import api from '@/lib/api'
+
+interface Consultor {
+  id: number
+  nome: string
+}
 
 interface Client {
   id: number
@@ -23,6 +30,9 @@ interface Client {
   estado: string
   active: boolean
   createdAt: string
+  portalAtivo: boolean
+  supabaseId: string | null
+  consultor?: { id: number; nome: string } | null
 }
 
 interface ClientsResponse {
@@ -33,10 +43,15 @@ interface ClientsResponse {
 }
 
 export default function ClientesPage() {
+  const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
+  const [vincularClient, setVincularClient] = useState<Client | null>(null)
+  const [selectedConsultorId, setSelectedConsultorId] = useState<string>('')
   const qc = useQueryClient()
+
+  const canManage = user?.role === 'admin' || user?.role === 'financeiro'
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['clients', { search, status, page }],
@@ -46,13 +61,35 @@ export default function ClientesPage() {
       }).then((r) => r.data),
   })
 
+  const { data: consultores } = useQuery<Consultor[]>({
+    queryKey: ['consultores'],
+    queryFn: () => api.get<Consultor[]>('/clients/consultores').then((r) => r.data),
+    enabled: canManage,
+  })
+
   const deleteMut = useMutation({
     mutationFn: (id: number) => api.delete(`/clients/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['clients'] }),
   })
 
+  const vincularMut = useMutation({
+    mutationFn: ({ id, consultorId }: { id: number; consultorId: number | null }) =>
+      api.patch(`/clients/${id}/vincular-consultor`, { consultorId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['clients'] })
+      setVincularClient(null)
+      setSelectedConsultorId('')
+    },
+  })
+
   function handleDelete(id: number, nome: string) {
     if (confirm(`Desativar cliente "${nome}"?`)) deleteMut.mutate(id)
+  }
+
+  function handleVincular() {
+    if (!vincularClient) return
+    const consultorId = selectedConsultorId ? Number(selectedConsultorId) : null
+    vincularMut.mutate({ id: vincularClient.id, consultorId })
   }
 
   return (
@@ -112,8 +149,9 @@ export default function ClientesPage() {
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nome</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">CPF</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">WhatsApp</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Cidade/UF</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Consultor</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Cadastro</th>
+                    <th className="text-center px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Portal</th>
                     <th className="text-center px-4 py-3 font-medium text-muted-foreground">Status</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">Ações</th>
                   </tr>
@@ -124,8 +162,29 @@ export default function ClientesPage() {
                       <td className="px-4 py-3 font-medium">{c.nome}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{formatCPF(c.cpf)}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{c.whatsapp ? formatPhone(c.whatsapp) : '—'}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden xl:table-cell">{c.cidade}{c.estado ? `/${c.estado}` : ''}</td>
+                      <td className="px-4 py-3 hidden xl:table-cell">
+                        {c.consultor ? (
+                          <span className="text-sm">{c.consultor.nome}</span>
+                        ) : canManage ? (
+                          <button
+                            onClick={() => { setVincularClient(c); setSelectedConsultorId('') }}
+                            className="text-xs text-primary hover:underline flex items-center gap-1"
+                          >
+                            <UserCheck className="size-3" />Vincular
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{formatDate(c.createdAt)}</td>
+                      <td className="px-4 py-3 text-center hidden xl:table-cell">
+                        {c.portalAtivo
+                          ? <Badge variant="success">Ativo</Badge>
+                          : c.supabaseId
+                            ? <Badge variant="secondary">Desativado</Badge>
+                            : <span className="text-muted-foreground text-xs">—</span>
+                        }
+                      </td>
                       <td className="px-4 py-3 text-center">
                         <Badge variant={c.active ? 'success' : 'outline'}>
                           {c.active ? 'Ativo' : 'Inativo'}
@@ -172,6 +231,41 @@ export default function ClientesPage() {
           )}
         </CardContent>
       </Card>
+
+      {vincularClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-base">Vincular Consultor</h2>
+              <button onClick={() => setVincularClient(null)}>
+                <X className="size-4 text-muted-foreground hover:text-foreground" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Cliente: <span className="font-medium text-foreground">{vincularClient.nome}</span>
+            </p>
+            <div className="space-y-1.5">
+              <Label>Consultor</Label>
+              <Select
+                value={selectedConsultorId}
+                onChange={(e) => setSelectedConsultorId(e.target.value)}
+                className="w-full"
+              >
+                <option value="">Sem consultor</option>
+                {consultores?.map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.nome}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setVincularClient(null)}>Cancelar</Button>
+              <Button size="sm" onClick={handleVincular} disabled={vincularMut.isPending}>
+                {vincularMut.isPending ? 'Salvando...' : 'Confirmar'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -69,7 +69,7 @@ export class PixService {
       throw new BadRequestException(`Parcela já está ${installment.status}`);
     }
 
-    const saldo = new Decimal(installment.valor.toString()).minus(
+    const saldo = new Decimal(installment.installmentAmount.toString()).minus(
       installment.totalPago.toString(),
     );
 
@@ -171,7 +171,7 @@ export class PixService {
     const loan = installment.loan;
     const client = loan.client;
 
-    const saldo = new Decimal(installment.valor.toString()).minus(
+    const saldo = new Decimal(installment.installmentAmount.toString()).minus(
       installment.totalPago.toString(),
     );
 

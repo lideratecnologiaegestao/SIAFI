@@ -37,17 +37,20 @@ export function formatCEP(cep: string) {
 }
 
 export const STATUS_LOAN: Record<string, { label: string; variant: 'success' | 'warning' | 'destructive' | 'outline' }> = {
-  ativo: { label: 'Ativo', variant: 'success' },
-  quitado: { label: 'Quitado', variant: 'outline' },
-  cancelado: { label: 'Cancelado', variant: 'destructive' },
+  aguardando_aceite:    { label: 'Aguardando aceite', variant: 'warning' },
+  aguardando_liberacao: { label: 'Aguardando liberação', variant: 'warning' },
+  ativo:       { label: 'Ativo', variant: 'success' },
+  quitado:     { label: 'Quitado', variant: 'outline' },
+  cancelado:   { label: 'Cancelado', variant: 'destructive' },
   inadimplente: { label: 'Inadimplente', variant: 'warning' },
 }
 
 export const STATUS_INSTALLMENT: Record<string, { label: string; variant: 'success' | 'warning' | 'destructive' | 'outline' }> = {
-  pendente: { label: 'Pendente', variant: 'outline' },
-  pago: { label: 'Pago', variant: 'success' },
-  atrasado: { label: 'Atrasado', variant: 'destructive' },
-  cancelado: { label: 'Cancelado', variant: 'warning' },
+  pendente:         { label: 'Pendente', variant: 'outline' },
+  parcialmente_pago: { label: 'Parcialmente pago', variant: 'warning' },
+  pago:             { label: 'Pago', variant: 'success' },
+  atrasado:         { label: 'Atrasado', variant: 'destructive' },
+  cancelado:        { label: 'Cancelado', variant: 'warning' },
 }
 
 export const METODO_PAGAMENTO: Record<string, string> = {

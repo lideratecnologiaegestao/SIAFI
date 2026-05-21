@@ -1,6 +1,7 @@
 import {
   Injectable,
   UnauthorizedException,
+  ForbiddenException,
   ConflictException,
   InternalServerErrorException,
 } from '@nestjs/common';
@@ -21,8 +22,15 @@ export interface AuthenticatedUser {
 export interface CreateOperatorDto {
   nome: string;
   username: string;
+  email?: string;
   password: string;
   role: UserRole;
+}
+
+export interface MfaStatus {
+  required: boolean;
+  prazoExpirado: boolean;
+  loginsRestantes: number;
 }
 
 @Injectable()
@@ -33,53 +41,74 @@ export class AuthService {
     private readonly supabase: SupabaseService,
   ) {}
 
-  // ─── Validate (used by LocalStrategy) ────────────────────────────────────────
+  // ─── Login principal (username OU email) ──────────────────────────────────
 
-  async validateUser(username: string, password: string): Promise<AuthenticatedUser | null> {
-    const user = await this.usersService.findByUsername(username);
-    if (!user || !user.active) return null;
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return null;
-    const { password: _pw, ...result } = user;
-    return result as AuthenticatedUser;
-  }
-
-  // ─── Login ────────────────────────────────────────────────────────────────────
-
-  async login(
-    username: string,
+  async loginComEmailOuCpf(
+    identificador: string,
     password: string,
     res: Response,
   ): Promise<{
     accessToken: string;
     user: { id: number; nome: string; role: string };
     needsMfa?: boolean;
+    setupMfaRequired?: boolean;
+    mfaStatus?: MfaStatus;
   }> {
-    // 1. Validate locally (bcrypt) to ensure credentials are correct
-    const user = await this.validateUser(username, password);
-    if (!user) throw new UnauthorizedException('Credenciais inválidas');
-
-    const email = this.toSupabaseEmail(username);
-
-    // 2. Auto-sync user to Supabase Auth on first login
-    const dbUser = await this.prisma.user.findUnique({ where: { id: user.id } });
-    if (!dbUser?.supabaseId) {
-      await this.syncToSupabase(user, password, email);
-    }
-
-    // 3. Sign in with Supabase to get session tokens
-    const { data, error } = await this.supabase.admin.auth.signInWithPassword({
-      email,
-      password,
+    // 1. Buscar em users por username OU email
+    const dbUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ username: identificador }, { email: identificador }],
+        active: true,
+      },
     });
 
+    if (!dbUser) throw new UnauthorizedException('Credenciais inválidas');
+
+    // 2. Verificar bloqueio por tentativas excessivas
+    if (dbUser.lockedUntil && dbUser.lockedUntil > new Date()) {
+      throw new UnauthorizedException('Conta temporariamente bloqueada. Tente novamente mais tarde.');
+    }
+
+    // 3. Validar senha bcrypt
+    const isMatch = await bcrypt.compare(password, dbUser.password);
+    if (!isMatch) {
+      await this.registrarFalhaLogin(dbUser.id);
+      throw new UnauthorizedException('Credenciais inválidas');
+    }
+
+    // 4. Resetar contador de falhas após login bem-sucedido
+    if (dbUser.failedLoginAttempts > 0) {
+      await this.prisma.user.update({
+        where: { id: dbUser.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+      });
+    } else {
+      await this.prisma.user.update({
+        where: { id: dbUser.id },
+        data: { lastLoginAt: new Date() },
+      });
+    }
+
+    const email = this.toSupabaseEmail(dbUser.username);
+
+    // 5. Auto-sync para Supabase Auth se ainda não sincronizado
+    if (!dbUser.supabaseId) {
+      await this.syncToSupabase(
+        { id: dbUser.id, username: dbUser.username, nome: dbUser.nome, role: dbUser.role },
+        password,
+        email,
+      );
+    }
+
+    // 6. Autenticar via Supabase
+    const { data, error } = await this.supabase.admin.auth.signInWithPassword({ email, password });
     if (error || !data.session) {
       throw new UnauthorizedException('Falha na autenticação Supabase');
     }
 
     const { access_token, refresh_token } = data.session;
 
-    // 4. Set Supabase refresh token as httpOnly cookie
+    // 7. Gravar refresh token em httpOnly cookie
     res.cookie('refresh_token', refresh_token, {
       httpOnly: true,
       sameSite: 'lax',
@@ -88,22 +117,205 @@ export class AuthService {
       path: '/',
     });
 
-    // 5. Determine if MFA challenge is still required
+    // 8. Verificar estado do MFA
     const aal = this.extractAal(access_token);
-    const hasMfaEnabled = data.session.user?.factors?.some(
+    const fatoresVerificados = data.session.user?.factors?.some(
       (f: { status: string }) => f.status === 'verified',
-    );
-    const needsMfa =
-      ['admin', 'financeiro'].includes(user.role) && hasMfaEnabled && aal !== 'aal2';
+    ) ?? false;
+
+    // Roles que exigem MFA imediato (sem prazo de graça)
+    const mfaImediato = ['admin', 'financeiro', 'consultor'].includes(dbUser.role);
+
+    // MFA configurado mas ainda em aal1 → precisa do challenge
+    const needsMfa = fatoresVerificados && aal !== 'aal2';
+
+    // Role exige MFA mas usuário ainda não configurou
+    const setupMfaRequired = mfaImediato && !fatoresVerificados;
+
+    // 9. Verificar prazo de graça de MFA (caixa)
+    const mfaStatus = await this.verificarPrazoMfa(dbUser.id, dbUser.role, 'user');
 
     return {
       accessToken: access_token,
-      user: { id: user.id, nome: user.nome, role: user.role },
+      user: { id: dbUser.id, nome: dbUser.nome, role: dbUser.role },
       ...(needsMfa ? { needsMfa: true } : {}),
+      ...(setupMfaRequired ? { setupMfaRequired: true } : {}),
+      ...(mfaStatus ? { mfaStatus } : {}),
     };
   }
 
-  // ─── Refresh ──────────────────────────────────────────────────────────────────
+  // ─── Validação de token Google OAuth ──────────────────────────────────────
+  // Chamado pelo endpoint POST /api/auth/validate-google logo após o callback.
+  // Garante que apenas emails pré-cadastrados em users ou clients têm acesso.
+  // Se não autorizado: deleta a conta do Supabase ANTES de lançar 403.
+
+  async validateGoogleOAuth(
+    email: string,
+    supabaseUserId: string,
+    ip?: string,
+  ): Promise<{ tipo: 'operador' | 'cliente'; role: string; prismaId: number }> {
+
+    // 1. Verificar em users (operadores)
+    const operador = await this.prisma.user.findFirst({
+      where: { email, active: true },
+      select: { id: true, role: true, supabaseId: true },
+    });
+
+    if (operador) {
+      // supabaseId já vinculado a outro token — possível conta duplicada/suspeita
+      if (operador.supabaseId && operador.supabaseId !== supabaseUserId) {
+        await this.revogarEAuditar(supabaseUserId, email, 'GOOGLE_SUPABASE_ID_MISMATCH', ip);
+        throw new ForbiddenException('Acesso não autorizado.');
+      }
+
+      // Primeiro login com Google — vincular supabaseId
+      if (!operador.supabaseId) {
+        await this.prisma.user.update({
+          where: { id: operador.id },
+          data: { supabaseId: supabaseUserId },
+        });
+        await this.supabase.admin.auth.admin.updateUserById(supabaseUserId, {
+          app_metadata: { role: operador.role, prismaId: operador.id, tipo: 'operador' },
+        });
+      }
+
+      return { tipo: 'operador', role: operador.role, prismaId: operador.id };
+    }
+
+    // 2. Verificar em clients (portal ativo)
+    const cliente = await this.prisma.client.findFirst({
+      where: { email, active: true, portalAtivo: true },
+      select: { id: true, supabaseId: true },
+    });
+
+    if (cliente) {
+      if (cliente.supabaseId && cliente.supabaseId !== supabaseUserId) {
+        await this.revogarEAuditar(supabaseUserId, email, 'GOOGLE_SUPABASE_ID_MISMATCH_CLIENT', ip);
+        throw new ForbiddenException('Acesso não autorizado.');
+      }
+
+      if (!cliente.supabaseId) {
+        await this.prisma.client.update({
+          where: { id: cliente.id },
+          data: { supabaseId: supabaseUserId },
+        });
+        await this.supabase.admin.auth.admin.updateUserById(supabaseUserId, {
+          app_metadata: { role: 'cliente', clientId: cliente.id, tipo: 'cliente' },
+        });
+      }
+
+      return { tipo: 'cliente', role: 'cliente', prismaId: cliente.id };
+    }
+
+    // 3. Email não cadastrado nem em users nem em clients — deletar e negar
+    await this.revogarEAuditar(supabaseUserId, email, 'GOOGLE_EMAIL_NAO_CADASTRADO', ip);
+    throw new ForbiddenException(
+      'Acesso não autorizado. Esta conta Google não está cadastrada no sistema.',
+    );
+  }
+
+  // Deleta a conta do Supabase Auth e registra no AuditLog.
+  // deleteUser SEMPRE antes de lançar exception — nunca deixar conta órfã.
+  private async revogarEAuditar(
+    supabaseUserId: string,
+    email: string,
+    motivo: string,
+    ip?: string,
+  ): Promise<void> {
+    try {
+      await this.supabase.admin.auth.admin.deleteUser(supabaseUserId);
+    } catch (err) {
+      console.error(`[Auth] Falha ao deletar conta Supabase ${supabaseUserId}:`, err);
+    }
+
+    await this.prisma.auditLog.create({
+      data: {
+        acao: motivo,
+        entidade: 'auth',
+        dados: { email, supabaseUserId, timestamp: new Date().toISOString() },
+        ip: ip ?? null,
+      },
+    }).catch(() => {});
+  }
+
+  // ─── Verificar prazo de graça do MFA ──────────────────────────────────────
+
+  async verificarPrazoMfa(
+    userId: number,
+    role: string,
+    tipo: 'user' | 'client',
+  ): Promise<MfaStatus | null> {
+    // admin, financeiro, consultor: MFA obrigatório — sem prazo de graça
+    if (['admin', 'financeiro', 'consultor'].includes(role)) {
+      return { required: true, prazoExpirado: true, loginsRestantes: 0 };
+    }
+
+    // caixa, cliente: prazo de 5 logins para configurar
+    if (['caixa', 'cliente'].includes(role)) {
+      let mfaEnabled: boolean;
+      let mfaLoginCount: number;
+
+      if (tipo === 'user') {
+        const u = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { mfaEnabled: true, mfaLoginCount: true },
+        });
+        mfaEnabled = u?.mfaEnabled ?? false;
+        mfaLoginCount = u?.mfaLoginCount ?? 0;
+
+        if (!mfaEnabled) {
+          await this.prisma.user.update({
+            where: { id: userId },
+            data: { mfaLoginCount: { increment: 1 } },
+          });
+        }
+      } else {
+        const c = await this.prisma.client.findUnique({
+          where: { id: userId },
+          select: { mfaEnabled: true, mfaLoginCount: true },
+        });
+        mfaEnabled = c?.mfaEnabled ?? false;
+        mfaLoginCount = c?.mfaLoginCount ?? 0;
+
+        if (!mfaEnabled) {
+          await this.prisma.client.update({
+            where: { id: userId },
+            data: { mfaLoginCount: { increment: 1 } },
+          });
+        }
+      }
+
+      // Já configurado — sem status de graça
+      if (mfaEnabled) return null;
+
+      const loginsRestantes = Math.max(0, 5 - mfaLoginCount);
+      return {
+        required: loginsRestantes <= 0,
+        prazoExpirado: loginsRestantes <= 0,
+        loginsRestantes,
+      };
+    }
+
+    return null;
+  }
+
+  // ─── validateUser (compatibilidade com LocalStrategy / Passport) ─────────
+
+  async validateUser(username: string, password: string): Promise<AuthenticatedUser | null> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ username }, { email: username }],
+        active: true,
+      },
+    });
+    if (!user) return null;
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return null;
+    const { password: _pw, ...result } = user;
+    return result as unknown as AuthenticatedUser;
+  }
+
+  // ─── Refresh ──────────────────────────────────────────────────────────────
 
   async refresh(refreshToken: string): Promise<{ accessToken: string }> {
     const { data, error } = await this.supabase.admin.auth.refreshSession({
@@ -115,7 +327,7 @@ export class AuthService {
     return { accessToken: data.session.access_token };
   }
 
-  // ─── Logout ───────────────────────────────────────────────────────────────────
+  // ─── Logout ───────────────────────────────────────────────────────────────
 
   async logout(supabaseId: string): Promise<void> {
     try {
@@ -125,7 +337,7 @@ export class AuthService {
     }
   }
 
-  // ─── Create Operator ──────────────────────────────────────────────────────────
+  // ─── Create Operator ──────────────────────────────────────────────────────
 
   async createOperator(dto: CreateOperatorDto): Promise<{
     id: number;
@@ -135,11 +347,15 @@ export class AuthService {
   }> {
     const email = this.toSupabaseEmail(dto.username);
 
-    // Check if username already exists in Prisma
     const existing = await this.prisma.user.findUnique({ where: { username: dto.username } });
     if (existing) throw new ConflictException('Username já está em uso');
 
-    // Create in Supabase Auth
+    if (dto.email) {
+      const emailExisting = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (emailExisting) throw new ConflictException('E-mail já está em uso');
+    }
+
+    // Criar no Supabase Auth
     const { data: authData, error } = await this.supabase.admin.auth.admin.createUser({
       email,
       password: dto.password,
@@ -154,19 +370,19 @@ export class AuthService {
 
     const supabaseId = authData.user.id;
 
-    // Create in Prisma with supabaseId
     const hashedPw = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
       data: {
         nome: dto.nome,
         username: dto.username,
+        email: dto.email ?? null,
         password: hashedPw,
         role: dto.role,
         supabaseId,
       },
     });
 
-    // Set prismaId in app_metadata for zero-latency guard lookups
+    // Atualizar app_metadata com prismaId para lookup rápido no guard
     await this.supabase.admin.auth.admin.updateUserById(supabaseId, {
       app_metadata: { role: dto.role, prismaId: user.id },
     });
@@ -174,7 +390,7 @@ export class AuthService {
     return { id: user.id, username: user.username, nome: user.nome, role: user.role };
   }
 
-  // ─── Sync Role ────────────────────────────────────────────────────────────────
+  // ─── Sync Role ────────────────────────────────────────────────────────────
 
   async syncRole(supabaseId: string, role: UserRole): Promise<void> {
     await this.supabase.admin.auth.admin.updateUserById(supabaseId, {
@@ -182,13 +398,13 @@ export class AuthService {
     });
   }
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────────
+  // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  private toSupabaseEmail(username: string): string {
+  toSupabaseEmail(username: string): string {
     return `${username}@siafi.local`;
   }
 
-  private extractAal(token: string): string {
+  extractAal(token: string): string {
     try {
       const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
       return (payload.aal as string) || 'aal1';
@@ -197,12 +413,25 @@ export class AuthService {
     }
   }
 
+  private async registrarFalhaLogin(userId: number): Promise<void> {
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { failedLoginAttempts: true },
+    });
+    const novasFilhas = (u?.failedLoginAttempts ?? 0) + 1;
+    // Bloquear por 15 minutos após 5 tentativas
+    const lockedUntil = novasFilhas >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { failedLoginAttempts: novasFilhas, lockedUntil },
+    });
+  }
+
   private async syncToSupabase(
     user: AuthenticatedUser,
     rawPassword: string,
     email: string,
   ): Promise<void> {
-    // Check if Supabase account exists with this email
     const { data: listData } = await this.supabase.admin.auth.admin.listUsers();
     const users = (listData as { users?: { id: string; email?: string }[] } | null)?.users ?? [];
     const existing = users.find((u) => u.email === email);

@@ -9,6 +9,7 @@ import {
   JOB_WA_COBRANCA_ATRASO,
   JOB_WA_CONFIRMACAO_PAGAMENTO,
   JOB_WA_PORTAL_ATIVADO,
+  JOB_WA_COBRANCA_ANTECIPADA,
 } from '../../queue/queue.constants';
 import type { NotificationJobData } from '../../queue/queue.interfaces';
 
@@ -64,6 +65,15 @@ export class WhatsAppWorker extends WorkerHost {
           `🔐 Senha temporária: *${senhaTemporaria ?? ''}*\n` +
           `🌐 https://financeiro.lidera.app.br/portal\n` +
           `⚠️ Troque sua senha no primeiro acesso.`;
+        break;
+
+      case JOB_WA_COBRANCA_ANTECIPADA:
+        message =
+          `Olá, ${clienteNome}! 💰\n` +
+          `Sua parcela de *${valor}* vence em *${dataVencimento ?? ''}*.\n` +
+          `Acesse o portal para pagar via PIX ou baixar o boleto:\n` +
+          `🌐 https://financeiro.lidera.app.br/portal\n` +
+          `Qualquer dúvida, estamos à disposição!`;
         break;
 
       default:

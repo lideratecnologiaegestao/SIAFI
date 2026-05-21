@@ -1,8 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { SupabaseService } from '../../supabase/supabase.service';
 
-// MFA enrollment/challenge happens on the frontend via supabase-js.
-// This service exposes backend helpers: status check and factor listing.
+// MFA enrollment/challenge é feito no frontend via supabase-js.
+// Este service expõe helpers de backend: status, listagem e remoção de fatores.
 @Injectable()
 export class MfaService {
   constructor(private readonly supabase: SupabaseService) {}
@@ -23,7 +23,13 @@ export class MfaService {
     if (error) throw new BadRequestException('Erro ao remover fator MFA');
   }
 
+  // admin, financeiro e consultor exigem MFA imediato (sem prazo de graça)
   roleRequiresMfa(role: string): boolean {
-    return ['admin', 'financeiro'].includes(role);
+    return ['admin', 'financeiro', 'consultor'].includes(role);
+  }
+
+  // caixa e cliente têm prazo de 5 logins para configurar
+  roleTemPrazoMfa(role: string): boolean {
+    return ['caixa', 'cliente'].includes(role);
   }
 }

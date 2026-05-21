@@ -28,6 +28,10 @@ class AuditQueryDto {
   @IsOptional()
   @IsString()
   entidade?: string;
+
+  @IsOptional()
+  @IsString()
+  acao?: string;
 }
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -43,6 +47,7 @@ export class AuditController {
       limit: query.limit,
       userId: query.userId,
       entidade: query.entidade,
+      acao: query.acao,
     });
   }
 }

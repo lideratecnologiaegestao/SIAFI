@@ -5,512 +5,389 @@
 
 ---
 
-## Sumário
+## Acesso ao Sistema
 
-1. [Acesso ao Sistema](#1-acesso-ao-sistema)
-2. [Tela Principal (Dashboard)](#2-tela-principal-dashboard)
-3. [Clientes](#3-clientes)
-4. [Empréstimos](#4-empréstimos)
-5. [Parcelas](#5-parcelas)
-6. [Pagamentos](#6-pagamentos)
-7. [Caixa](#7-caixa)
-8. [Inadimplentes](#8-inadimplentes)
-9. [Renegociações](#9-renegociações)
-10. [PIX](#10-pix)
-11. [Relatórios](#11-relatórios)
-12. [Conciliação Bancária](#12-conciliação-bancária)
-13. [Notificações](#13-notificações)
-14. [Suporte](#14-suporte)
-15. [Usuários do Sistema](#15-usuários-do-sistema)
-16. [Configurações](#16-configurações)
-17. [Auditoria](#17-auditoria)
-18. [Perfis de Acesso](#18-perfis-de-acesso)
-19. [Dúvidas Frequentes](#19-dúvidas-frequentes)
+**URL:** https://financeiro.lidera.app.br
+
+### Login
+1. Informe o **usuário** (username ou e-mail) e a **senha**
+2. Clique em **Entrar**
+3. Se MFA estiver ativado, informe o código TOTP do autenticador
+
+### Configurar Autenticação em Dois Fatores (MFA)
+1. Acesse o menu superior → **MFA Setup**
+2. Escaneie o QR Code com Google Authenticator ou Authy
+3. Digite o código de 6 dígitos para confirmar
+4. Guarde os códigos de recuperação em local seguro
+
+> ⚠️ Após ativar o MFA, ele será exigido a cada login.
 
 ---
 
-## 1. Acesso ao Sistema
+## Perfis de Acesso
 
-**URL de Acesso:** https://financeiro.lidera.app.br
-
-### Como fazer login
-
-1. Acesse a URL do sistema no navegador
-2. Digite seu **usuário** (ex: `joao.silva`)
-3. Digite sua **senha**
-4. Clique em **Entrar**
-
-> Caso esqueça a senha, entre em contato com o Administrador do sistema.
-
-### Autenticação em Dois Fatores (MFA)
-
-Se o seu perfil é **Administrador** ou **Financeiro** e você configurou a autenticação em dois fatores:
-1. Após inserir usuário e senha, o sistema solicitará um **código de verificação**
-2. Abra o aplicativo autenticador no seu celular (Google Authenticator, Authy, etc.)
-3. Digite o código de 6 dígitos exibido no app
-4. Clique em **Verificar**
-
-> O código muda a cada 30 segundos. Digite antes de expirar.
-
-### Configurar autenticação em dois fatores
-
-Se você deseja ativar o MFA no seu perfil:
-1. Entre no sistema normalmente
-2. Acesse **Configurações → Segurança → Ativar Autenticação em Dois Fatores**
-3. Escaneie o QR Code com seu aplicativo autenticador
-4. Confirme com o primeiro código gerado
-
-### Login com Google
-
-Usuários que possuem conta Google vinculada podem clicar em **Entrar com Google** na tela de login.
-
-### Sair do sistema
-
-Clique no seu nome no canto superior direito → **Sair**.
+| Perfil | O que pode fazer |
+|--------|-----------------|
+| **Admin** | Tudo — configurações, usuários, auditoria, exclusão de dados |
+| **Financeiro** | Clientes, contratos, pagamentos, relatórios, reparcelamentos, intenções |
+| **Caixa** | Registrar pagamentos, caixa, visualizar clientes e parcelas |
+| **Consultor** | Carteira própria, criar intenções e clientes, acompanhar reparcelamentos |
+| **Cliente** | Somente portal próprio — ver contratos, parcelas, pagar via PIX |
 
 ---
 
-## 2. Tela Principal (Dashboard)
+## Dashboard
 
-A tela inicial apresenta um resumo de toda a operação financeira, **atualizado automaticamente em tempo real**.
+Exibe em tempo real:
+- **Clientes Ativos** — total de clientes com status ativo
+- **Empréstimos Ativos** — valor em carteira + valor a faturar
+- **Clientes Atrasados** — clientes com parcelas em atraso
+- **Clientes Quitados** — clientes que já quitaram empréstimos
 
-### Cards de Resumo (clicáveis)
-
-| Card | O que mostra | Clique para |
-|------|-------------|------------|
-| **Clientes Ativos** | Total de clientes ativos | Abrir lista de clientes |
-| **Empréstimos Ativos** | Total de contratos ativos | Abrir lista de empréstimos |
-| **Clientes Atrasados** | Clientes com parcela vencida | Abrir carteira inadimplente |
-| **Clientes Quitados** | Clientes com empréstimo pago | Informativo |
-
-> Os cards **Empréstimos Ativos** são visíveis apenas para perfis Administrador e Financeiro.
-
-### Atualização em Tempo Real
-
-O dashboard atualiza os dados automaticamente quando pagamentos são registrados ou parcelas mudam de status. Um indicador verde pulsante no canto superior confirma que a conexão em tempo real está ativa.
-
-### Lista de Clientes Atrasados
-
-Exibe o nome de cada cliente em atraso e a quantidade de parcelas pendentes. Clique no nome para ver o perfil completo do cliente.
-
-### Lista de Clientes Quitados
-
-Exibe clientes que já quitaram seus empréstimos. Clique no nome para ver o histórico.
+Clique em qualquer card para navegar à lista correspondente.
 
 ---
 
-## 3. Clientes
+## Clientes
 
-Menu: **Operacional → Clientes**
+### Listagem
+- Busca por nome, CPF ou WhatsApp
+- Filtro por status (Ativo / Inativo)
+- Coluna **Consultor** — clientes sem consultor mostram botão "Vincular" (admin/financeiro)
+- Coluna **Portal** — indica se o acesso ao portal está ativo
 
-### Ver lista de clientes
-
-- Use a barra de **busca** para localizar por nome, CPF ou WhatsApp
-- Filtre por **Status**: Todos · Ativos · Inativos
-- Navegue pelas páginas com os botões **Anterior / Próximo**
-
-### Cadastrar novo cliente
-
+### Cadastrar Novo Cliente
 1. Clique em **Novo Cliente**
-2. Preencha os **Dados Pessoais**: Nome, CPF/CNPJ, RG, Data de Nascimento
-3. Preencha os **Dados de Contato**: WhatsApp, Telefone, E-mail
-4. Preencha o **Endereço**: Rua, Bairro, Cidade, Estado, CEP
-5. Faça upload de documentos (opcional): Foto, RG, Comprovante de Endereço
-6. Clique em **Salvar Cliente**
+2. Preencha os dados pessoais (nome e WhatsApp são obrigatórios)
+3. Se for admin/financeiro: selecione o **Consultor responsável** (opcional)
+4. Faça upload dos documentos (foto, RG, comprovante)
+5. Clique em **Salvar Cliente**
 
-> **CPF ou CNPJ:** O campo aceita tanto CPF (pessoa física, 11 dígitos) quanto CNPJ (empresa, 14 dígitos). A formatação é aplicada automaticamente conforme você digita. O CPF é único no sistema — não é possível cadastrar dois clientes com o mesmo CPF/CNPJ.
+> Consultores: ao criar um cliente, ele é automaticamente vinculado à sua carteira.
 
-> **Documentos:** Os arquivos são armazenados de forma segura na nuvem. Formatos aceitos: JPG, PNG, WEBP e PDF. Tamanho máximo: 10 MB por arquivo.
+### Detalhe do Cliente
+Exibe:
+- Dados pessoais, contatos, endereço
+- **Consultor vinculado** — com botão "Alterar" (admin/financeiro)
+- Documentos (links com expiração de 1h)
+- **Portal do Cliente** — status, MFA, último acesso, reenvio de senha
+- Score de Risco (0–100)
+- Histórico de contratos
 
-### Ver detalhes do cliente
+### Vincular Consultor
+- Na listagem: clique em **Vincular** na coluna Consultor
+- No detalhe: clique em **Alterar** no card Consultor
+- Selecione o consultor no dropdown e confirme
 
-Clique no botão **Ver** ou no nome do cliente para abrir o perfil completo, que exibe:
-- Dados pessoais e de contato
-- Endereço
-- **Documentos**: visualização dos arquivos enviados (foto, RG, comprovante)
-- **Contratos (Empréstimos)**: listados sequencialmente (Contrato 1, Contrato 2...) com status
-- Botão para criar novo empréstimo para esse cliente
-
-### Editar cliente
-
-No perfil do cliente, clique em **Editar** e altere os campos necessários.
-Campos opcionais podem ser deixados em branco. Documentos existentes são mantidos se nenhum novo arquivo for selecionado.
-
-### Inativar cliente
-
-Na lista de clientes, clique no ícone de **lixeira** na linha do cliente. O sistema exibe uma confirmação antes de desativar.
-
-> Clientes inativos não são excluídos — apenas ficam invisíveis nas listagens padrão.
+### Portal do Cliente (card na página de detalhe)
+- **Ativar portal**: cria conta no Supabase, envia senha temporária por email e WhatsApp
+- **Reenviar senha**: gera nova senha temporária e envia por email e WhatsApp
+- **Desativar/Reativar**: bloqueia ou desbloqueia o acesso
+- O aviso "⚠️ Cliente ainda não trocou a senha temporária" aparece enquanto `senhaTemporaria=true`
 
 ---
 
-## 4. Empréstimos
+## Empréstimos (Contratos)
 
-Menu: **Operacional → Empréstimos**
+### Fluxo Completo do Contrato
 
-### Ver lista de empréstimos
+```
+Intenção criada → Aprovada → Contrato gerado (aguardando_aceite)
+                                      ↓
+                          Cliente assina no portal (N dias)
+                                      ↓
+                          Caixa/Financeiro confirma entrega (aguardando_liberacao)
+                                      ↓
+                          Contrato ATIVO — parcelas com datas atualizadas
+                                      ↓
+                          Parcelas pagas → QUITADO
+```
 
-- Busque por **nome do cliente** ou CPF
-- Filtre por **Status**: Todos · Ativos · Quitados · Inadimplentes · Cancelados
-- O rodapé exibe o **total de contratos** e a **soma dos valores** conforme o filtro
+### Criar Empréstimo
+1. Acesse **Empréstimos → Novo Empréstimo**
+2. Selecione o cliente
+3. Informe o valor total, valor da parcela (ou taxa de juros), número de parcelas
+4. Defina a data de início e, opcionalmente, o **dia fixo de vencimento** (1–28)
+5. Configure as opções de cobrança:
+   - Multa por atraso (% — aplicada uma vez)
+   - Mora diária (% ao dia sobre saldo devedor)
+   - Dias de antecedência para cobrança antecipada
+   - Canais: WhatsApp, Email, Portal
+6. Clique em **Criar Empréstimo**
 
-### Criar novo empréstimo
+> O simulador inline mostra a prévia de multa e mora acumulada.
 
-1. Clique em **Novo Empréstimo**
-2. Selecione o **Cliente**
-3. Informe o **Valor do Empréstimo** (valor entregue ao cliente)
-4. Informe o **Valor Investido** (opcional — custo de capital)
-5. Informe o **Número de Parcelas**
-6. Informe o **Valor da Parcela** (cada prestação que o cliente pagará)
-7. Selecione a **Forma de Pagamento** (Dinheiro, PIX, Cartão, etc.)
-8. Defina a **Data de Início** (data da primeira parcela)
-9. Adicione **Observações** se necessário
+### Status do Contrato
 
-**Simulação ao vivo** (atualiza conforme você digita):
-- Capital · Parcelas × Valor · Total a Pagar · Total de Acréscimo
-
-10. Clique em **Criar Empréstimo**
-
-> O sistema gera automaticamente todas as parcelas mensais a partir da data de início.
-
-### Ver detalhes do empréstimo
-
-Clique em **Ver** (ícone de olho) para abrir o detalhamento com:
-- Resumo: Valor Emprestado · Total a Pagar · Total Pago · Pendente
-- Informações do contrato (taxa, parcelas, data)
-- Tabela de todas as parcelas com status e botões de ação
-- Botões: **Renegociar** · **Cancelar Empréstimo**
-
-### Registrar pagamento rápido (inline)
-
-Na tela de detalhe do empréstimo, clique em **Pagar** na linha da parcela desejada:
-1. O sistema pré-preenche o saldo devedor
-2. Confirme ou ajuste o **Valor Pago**
-3. Selecione o **Método de Pagamento**
-4. Clique em **Confirmar Pagamento**
-
-> É possível pagar um valor **maior** que o saldo da parcela (para incluir multa ou mora).
-
-### Cancelar empréstimo
-
-No detalhamento, clique em **Cancelar** (botão vermelho). O sistema cancela o contrato e todas as parcelas pendentes.
-
----
-
-## 5. Parcelas
-
-Menu: **Operacional → Parcelas**
-
-Exibe todas as parcelas em atraso do sistema, ordenadas por data de vencimento mais antiga.
-
-| Coluna | Descrição |
+| Status | Descrição |
 |--------|-----------|
-| Cliente | Nome do cliente devedor |
-| Empréstimo | Número do contrato |
-| Parcela | Número da parcela |
-| Vencimento | Data de vencimento original |
-| Dias em Atraso | Quantos dias desde o vencimento |
-| Saldo | Valor ainda não pago |
+| `Aguardando aceite` | Cliente precisa assinar no portal |
+| `Aguardando liberação` | Capital precisa ser confirmado |
+| `Ativo` | Em andamento |
+| `Quitado` | Todas as parcelas pagas |
+| `Cancelado` | Cancelado por SLA ou manualmente |
 
-Botões por parcela:
-- **Pagar**: abre o formulário de pagamento para essa parcela
-- **PIX**: gera QR Code para essa parcela
+### Liberar Capital
+1. No detalhe do empréstimo com status "Aguardando liberação"
+2. Clique em **Confirmar Entrega de Capital**
+3. Selecione o método de liberação (PIX, dinheiro, transferência, etc.)
+4. Uma saída é registrada automaticamente no caixa
 
----
+### Cancelar Empréstimo
+- Apenas contratos em `aguardando_aceite` ou `aguardando_liberacao` podem ser cancelados
+- Todas as parcelas pendentes são marcadas como `cancelado`
 
-## 6. Pagamentos
-
-Menu: **Operacional → Pagamentos**
-
-### Ver histórico de pagamentos
-
-Lista todos os pagamentos recebidos, com filtro por busca de cliente.
-
-### Registrar novo pagamento
-
-1. Clique em **Registrar Pagamento**
-2. Selecione o **Cliente**
-3. Selecione o **Empréstimo** do cliente
-4. Selecione a **Parcela** específica
-5. Informe o **Valor Pago**
-6. Informe a **Data do Pagamento**
-7. Selecione o **Método** (Dinheiro, PIX, etc.)
-8. Adicione **Observação** se necessário
-9. Clique em **Confirmar Pagamento**
-
-> O valor é pré-preenchido automaticamente com o saldo devedor da parcela.
-
-### Estornar pagamento
-
-Na lista de pagamentos, clique em **Estornar** (apenas Administrador e Financeiro). O sistema:
-- Remove o pagamento
-- Recalcula o saldo da parcela
-- Reverte o status da parcela para pendente ou atrasado
-- Reverte o empréstimo de "Quitado" para "Ativo" se necessário
+### Aba Cobranças (no detalhe)
+Exibe por parcela:
+- Data de envio da cobrança antecipada
+- Confirmação por canal (WhatsApp ✅ / Email ✅ / Portal ✅)
+- Multa aplicada e valor com encargos
 
 ---
 
-## 7. Caixa
+## Parcelas
 
-Menu: **Financeiro → Caixa**
+### Listagem de Parcelas em Atraso
+- Acesse **Parcelas** no menu lateral
+- Exibe todas as parcelas com status `atrasado`
+- Mostra saldo devedor, mora acumulada e multa aplicada
 
-### Saldo atual
-
-Exibe o resumo financeiro do mês:
-- **Entradas**: pagamentos recebidos + entradas manuais
-- **Saídas**: despesas registradas
-- **Saldo**: diferença
-
-### Lançar transação manual
-
-Para registrar despesas ou entradas que não são pagamentos de parcelas:
-1. Preencha a **Descrição**
-2. Selecione o **Tipo**: Entrada ou Saída
-3. Informe o **Valor**
-4. Informe a **Data**
-5. Selecione a **Categoria**
-6. Clique em **Lançar**
+### Pagamento Parcial
+Quando um cliente paga menos do que o valor integral:
+- Status da parcela vai para `parcialmente_pago`
+- **Saldo devedor** fica registrado na parcela
+- **Mora diária** é calculada sobre o saldo (cron 08h05)
+- Próximo pagamento pode quitar o saldo restante
 
 ---
 
-## 8. Inadimplentes
+## Pagamentos
 
-Menu: **Operacional → Inadimplentes**
+### Registrar Pagamento
+1. Acesse **Pagamentos → Novo Pagamento**
+2. Selecione o cliente → o empréstimo → a parcela
+3. Informe o valor e a data de pagamento
+4. Clique em **Registrar**
 
-Lista todos os clientes com parcelas em atraso, mostrando:
-- Nome do cliente
-- Saldo devedor total
-- Botões: **Renegociar** · **Ver Empréstimo**
+> O sistema calcula automaticamente se é pagamento total ou parcial.
 
-> Use esta tela para priorizar a cobrança dos clientes inadimplentes.
+### Estornar Pagamento
+1. Acesse **Pagamentos** → localize o pagamento
+2. Clique em **Estornar**
+3. Confirme o estorno
 
----
-
-## 9. Renegociações
-
-Menu: **Financeiro → Renegociações**
-
-### O que é uma renegociação?
-
-Renegociar significa cancelar as parcelas pendentes e atrasadas de um empréstimo e substituí-las por novas condições.
-
-### Criar nova renegociação
-
-1. Acesse **Renegociações → Nova Renegociação**
-2. Selecione o **Empréstimo** a ser renegociado
-3. Defina o **Novo Número de Parcelas**
-4. Defina a **Nova Taxa de Juros** (%)
-5. Defina a **Data de Início** das novas parcelas
-6. Adicione **Observações** sobre o motivo
-7. Clique em **Confirmar Renegociação**
-
-> **Atenção:** Esta operação é irreversível. As parcelas antigas são canceladas e substituídas pelas novas.
+> O estorno recalcula o saldo devedor e o status da parcela.
 
 ---
 
-## 10. PIX
+## Caixa
 
-Menu: **Financeiro → PIX**
+Exibe o saldo atual e o histórico de transações.
 
-### Gerar QR Code para pagamento
+### Lançamento Manual
+1. Clique em **Novo Lançamento**
+2. Selecione Entrada ou Saída
+3. Informe o valor, descrição e referência (opcional)
 
-1. Selecione o **Cliente**
-2. Selecione o **Empréstimo**
-3. Selecione a **Parcela**
-4. Clique em **Gerar QR Code PIX**
-
-O sistema exibe:
-- Imagem do QR Code para escanear
-- **Código Copia e Cola** (botão de copiar)
-- Valor e data de geração
-
-> O QR Code expira conforme configuração do Mercado Pago.
+> Liberações de capital e estornos geram transações automaticamente.
 
 ---
 
-## 11. Relatórios
+## Inadimplentes
 
-Menu: **Relatórios → Relatórios**
-
-### Aba Carteira
-
-Visão geral da carteira de crédito ativa:
-
-| Indicador | O que significa |
-|-----------|----------------|
-| **Valor Investido** | Soma do capital desembolsado nos empréstimos ativos |
-| **Valor Total Parcelado** | Soma de todas as parcelas dos empréstimos ativos |
-| **Valor Recebido** | Total já recebido em pagamentos |
-| **A Receber** | Parcelas pendentes e em atraso |
-| Empréstimos Ativos | Quantidade de contratos ativos |
-| Empréstimos em Atraso | Contratos com pelo menos 1 parcela vencida |
-
-### Aba Clientes
-
-Resumo do portfólio de clientes:
-- Total de clientes
-- Clientes com empréstimo ativo
-- Inadimplentes
-- Novos cadastros no mês
-
-### Aba Movimentação
-
-Entradas e saídas em um período selecionado:
-1. Defina a **Data Inicial** e **Data Final**
-2. Clique em **Gerar**
-3. O sistema exibe Entradas · Saídas · Saldo do período
-
-### Aba Contratos
-
-Lista de todos os contratos com filtro por status.
-- Filtre por: Todos · Ativos · Quitados · Inadimplentes · Cancelados
-- **Rodapé**: exibe quantidade de contratos e soma total dos valores
+Lista clientes com parcelas em atraso, com:
+- Nome e contato
+- Quantidade de parcelas atrasadas
+- Valor total em atraso
+- Score de risco
 
 ---
 
-## 12. Conciliação Bancária
+## Intenções de Empréstimo
 
-Menu: **Financeiro → Conciliação**
+Consultores criam intenções antes de gerar o contrato formal.
 
-Permite visualizar toda a movimentação financeira de um mês específico:
-1. Selecione o **Mês** e o **Ano**
-2. O sistema lista todas as transações e pagamentos do período
-3. Compare com o extrato bancário para identificar divergências
+### Criar Intenção
+1. Acesse **Intenções → Nova Intenção**
+2. Selecione o cliente, informe o valor solicitado e a finalidade
+3. Clique em **Enviar**
 
----
+### Analisar Intenção (Financeiro/Admin)
+- A intenção fica com status `pendente` até a análise
+- **SLA:** 48h por padrão (configurável em Configurações)
+- Clique em **Aprovar** → o contrato é criado automaticamente
+- Clique em **Rejeitar** → intenção encerrada com motivo
+- **Feedback** → comentário sem decisão
 
-## 13. Notificações
-
-Menu: **Comunicação → Notificações**
-
-Exibe o histórico de todas as notificações enviadas pelo sistema (WhatsApp e E-mail):
-- Data e hora de envio
-- Tipo (lembrete, cobrança, confirmação)
-- Cliente destinatário
-- Status (enviado, falhou)
+> Se o cliente não tem portal ativo, a aprovação pode ativá-lo automaticamente.
 
 ---
 
-## 14. Suporte
+## Reparcelamento
 
-Menu: **Comunicação → Suporte**
+Permite reestruturar um contrato ativo com novo prazo e valor.
 
-Lista os tickets de atendimento abertos pelos clientes no Portal do Cliente.
+### Solicitar Reparcelamento
+1. Acesse **Reparcelamentos → Novo Reparcelamento**
+2. Selecione o contrato
+3. Informe o motivo e use o **simulador** para visualizar as novas parcelas
+4. Envie a solicitação
 
-| Status | Significado |
-|--------|------------|
-| **Aberto** | Aguardando resposta da equipe |
-| **Respondido** | Equipe já respondeu |
-| **Fechado** | Ticket encerrado |
+### Fluxo de Aprovação
 
----
-
-## 15. Usuários do Sistema
-
-Menu: **Administração → Usuários** *(apenas Administradores)*
-
-### Ver lista de usuários
-
-Exibe todos os operadores cadastrados com nome, usuário, perfil e status.
-
-### Criar novo usuário
-
-1. Clique em **Novo Usuário**
-2. Informe o **Nome Completo**
-3. Informe o **Username** (login — apenas letras minúsculas, números, ponto e underline)
-4. Informe a **Senha** (mínimo 8 caracteres)
-5. Selecione o **Perfil de Acesso**:
-   - **Usuário**: apenas visualização do dashboard
-   - **Caixa**: pagamentos e caixa
-   - **Financeiro**: operacional completo
-   - **Administrador**: acesso total
-   - **Cliente**: portal do cliente
-6. Clique em **Criar Usuário**
-
-> O usuário é criado automaticamente no sistema de autenticação. Não é necessário nenhuma configuração adicional.
-
-### Editar usuário
-
-Na lista, clique no ícone de edição. É possível alterar:
-- Nome, Username, Perfil, Status (Ativo/Inativo)
-- **Senha**: deixe em branco para manter a atual; preencha para trocar
+```
+Solicitado
+    → Financeiro envia proposta (novos valores)
+    → Admin aprova (2ª instância)
+    → Executado atomicamente:
+        ✓ Loan original cancelado
+        ✓ Parcelas não pagas canceladas
+        ✓ Novo loan criado com nova configuração
+        ✓ Score de risco recalculado
+```
 
 ---
 
-## 16. Configurações
+## Score de Risco
 
-Menu: **Administração → Configurações** *(apenas Administradores)*
+Pontuação 0–100 calculada automaticamente após cada pagamento.
 
-Permite ajustar parâmetros do sistema:
+| Score | Classificação |
+|-------|--------------|
+| 80–100 | Excelente |
+| 60–79 | Bom |
+| 40–59 | Médio |
+| 0–39 | Alto risco |
 
-| Seção | Parâmetros |
-|-------|-----------|
-| **Sistema** | Nome da empresa, logo |
-| **WhatsApp** | URL, chave e instância da Evolution API |
-| **Mercado Pago** | Tokens de acesso e webhook |
-| **E-mail** | Servidor SMTP e credenciais |
-| **Empréstimos** | Valores padrão de taxa e parcelas |
-
----
-
-## 17. Auditoria
-
-Menu: **Administração → Auditoria** *(apenas Administradores)*
-
-Registra automaticamente todas as ações realizadas no sistema:
-- Quem realizou a ação (usuário)
-- Quando foi realizada (data/hora)
-- O que foi feito (ação e entidade)
-- Endereço IP de origem
-
-Use para rastrear alterações e garantir conformidade.
+**Componentes:**
+- Pontualidade (50%): proporção de parcelas pagas no prazo
+- Reparcelamentos (30%): penaliza histórico de reparcelamentos
+- Quitações (20%): bonifica contratos quitados
 
 ---
 
-## 18. Perfis de Acesso
+## Relatórios
 
-| Perfil | Dashboard | Clientes | Empréstimos | Pagamentos | Caixa | Relatórios | Usuários | Config | Auditoria |
-|--------|-----------|----------|------------|------------|-------|-----------|---------|--------|-----------|
-| **Admin** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Financeiro** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| **Caixa** | ✅ | Ler | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Usuário** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+Acesse **Relatórios** no menu lateral. Cinco abas:
 
-> **Estornar pagamento:** disponível apenas para Administrador e Financeiro.
-
----
-
-## 19. Dúvidas Frequentes
-
-**P: O empréstimo foi marcado como "Quitado" mas há um pagamento errado. O que fazer?**
-R: Acesse o pagamento incorreto em **Pagamentos** e clique em **Estornar**. O sistema reverte automaticamente o status.
-
-**P: Preciso aceitar um valor maior que o da parcela (com multa/mora)?**
-R: Sim, o sistema aceita qualquer valor positivo. Na tela de pagamento, simplesmente insira o valor total incluindo multa e juros.
-
-**P: Como identificar os empréstimos de um cliente específico?**
-R: Acesse o perfil do cliente em **Clientes → [nome do cliente]**. A seção "Empréstimos" lista todos os contratos do cliente numerados sequencialmente (Contrato 1, 2, etc.).
-
-**P: A parcela não aparece como "Paga" mesmo após o pagamento.**
-R: Verifique se o valor total pago já atingiu o valor da parcela. Pode haver pagamentos parciais anteriores. Verifique em **Empréstimos → [empréstimo] → Parcelas**.
-
-**P: Como gerar um QR Code PIX para cobrança?**
-R: Acesse **PIX** no menu Financeiro, selecione o cliente → empréstimo → parcela e clique em **Gerar QR Code PIX**. Compartilhe o código com o cliente.
-
-**P: Esqueci a senha de um operador. Como redefinir?**
-R: Acesse **Usuários → [operador] → Editar**, preencha o campo **Nova Senha** e salve.
-
-**P: Como registrar uma despesa no caixa?**
-R: Acesse **Caixa**, preencha o formulário de lançamento com Tipo = Saída e o valor da despesa.
-
-**P: O sistema pede um código mesmo depois de digitar usuário e senha.**
-R: Seu perfil tem autenticação em dois fatores (MFA) ativada. Abra o aplicativo autenticador no celular e insira o código de 6 dígitos exibido.
-
-**P: Posso cadastrar um cliente que é empresa (CNPJ)?**
-R: Sim. O campo CPF/CNPJ aceita ambos. Digite os 14 dígitos do CNPJ — a formatação é aplicada automaticamente.
+| Aba | Conteúdo |
+|-----|----------|
+| **Carteira** | Valor investido, a receber, capital em risco, totais |
+| **Faturamento** | Faturamento mensal por consultor |
+| **Clientes** | Clientes ativos com próxima parcela e score |
+| **Movimentação** | Entradas e saídas por período |
+| **Contratos** | Lista filtrada de contratos |
 
 ---
 
-> **Suporte Técnico:** lideraabrange@gmail.com
->
-> *Manual SIAFI 2.0 — Versão Maio 2026*
+## Mensagens (Chat Interno)
+
+Chat entre operadores com notificação em tempo real.
+
+- Badge com contagem de não-lidas aparece no menu lateral
+- Novas mensagens chegam instantaneamente via Supabase Realtime
+- Conversas são por pares de usuários (direto)
+
+---
+
+## PIX
+
+1. Acesse **PIX** no menu lateral
+2. Selecione a parcela
+3. Clique em **Gerar QR Code**
+4. O QR Code é enviado ao cliente e aparece na tela
+
+> Pagamentos via Mercado Pago são processados automaticamente via webhook.
+
+---
+
+## Conciliação
+
+Comparativo entre pagamentos registrados no sistema e recebimentos via Mercado Pago.
+
+---
+
+## Notificações
+
+Log de todos os emails e WhatsApp enviados pelo sistema, com status de entrega.
+
+---
+
+## Auditoria (Admin)
+
+Log completo de todas as ações do sistema.
+
+- **Filtro por ação:** `EMAIL_ENVIADO`, `EMAIL_FALHOU`, `PORTAL_ATIVADO`, `LOGIN`, etc.
+- **Filtro por entidade:** `client`, `loan`, `email`, `payment`
+- **Detalhe expandível:** clique na linha para ver destinatário, erro SMTP, messageId, etc.
+
+**Ações de email registradas:**
+| Ação | Significado |
+|------|------------|
+| `EMAIL_ENVIADO` | Email entregue com sucesso |
+| `EMAIL_FALHOU` | Erro SMTP — detalhe na linha expandida |
+| `EMAIL_IGNORADO` | Cliente sem email cadastrado |
+
+---
+
+## Configurações (Admin)
+
+Parâmetros do sistema ajustáveis sem código:
+
+| Parâmetro | Padrão | Descrição |
+|-----------|--------|-----------|
+| Taxa de mora diária | 0,1% ao dia | Aplicada sobre saldo devedor |
+| Taxa de multa | 2% | Aplicada uma vez no atraso |
+| SLA aceite contrato | 5 dias | Prazo para cliente assinar |
+| SLA intenção | 48 horas | Prazo para financeiro analisar |
+| Dias antecedência cobrança | 10 dias | Cobrança antecipada antes do vencimento |
+
+---
+
+## Usuários (Admin)
+
+### Criar Operador
+1. Acesse **Usuários → Novo Usuário**
+2. Informe nome, username, email e senha provisória
+3. Selecione o perfil (admin, financeiro, caixa, consultor)
+4. O usuário recebe acesso imediato
+
+### Editar/Inativar
+- Clique no usuário → **Editar**
+- Para inativar: desmarque "Ativo" ou use o botão Desativar
+
+---
+
+## Perguntas Frequentes
+
+**O cliente não recebeu o email com a senha?**
+1. Acesse /auditoria e filtre por `EMAIL_FALHOU` ou `EMAIL_IGNORADO`
+2. Se `EMAIL_IGNORADO`: o cliente não tem email cadastrado — atualize o cadastro
+3. Se `EMAIL_FALHOU`: veja o erro SMTP na linha expandida
+4. Clique em **Reenviar senha** no card Portal do cliente
+
+**Como saber se o email foi entregue?**
+- Acesse /auditoria e filtre por `EMAIL_ENVIADO`
+- A linha expandida mostra `messageId` confirmado pelo servidor SMTP
+
+**Como liberar um contrato já assinado pelo cliente?**
+- Acesse o contrato com status "Aguardando liberação"
+- Clique em **Confirmar Entrega de Capital**
+
+**O contrato aparece como "Aguardando aceite" mas o prazo venceu?**
+- O cron de 07h cancela automaticamente contratos com SLA vencido
+- O consultor é notificado com 1 dia de antecedência
+
+**Como recalcular o score de risco de um cliente?**
+- Acesse o detalhe do cliente → card Score de Risco → **Recalcular**
+- Ou registre um pagamento — o score é recalculado automaticamente
+
+**Como reverter um pagamento registrado errado?**
+- Acesse **Pagamentos** → localize o pagamento → **Estornar**
+- O saldo devedor e o status da parcela são revertidos automaticamente
+
+**Um cliente quer excluir seus dados (LGPD)?**
+- Inative o cliente (soft-delete)
+- Dados financeiros são retidos por 5 anos (obrigação legal)
+- Documentos pessoais (fotos/RG) podem ser excluídos manualmente do Supabase Storage
+- Registre a solicitação para fins de auditoria

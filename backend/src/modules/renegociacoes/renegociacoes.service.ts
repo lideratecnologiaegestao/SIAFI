@@ -39,7 +39,7 @@ export class RenegociacoesService {
         throw new BadRequestException('Nenhuma parcela pendente ou atrasada para renegociar');
 
       const saldoDevedor = loan.installments.reduce((acc, inst) => {
-        return acc + (Number(inst.valor) - Number(inst.totalPago));
+        return acc + (Number(inst.installmentAmount) - Number(inst.totalPago));
       }, 0);
 
       const installmentIds = loan.installments.map((i) => i.id);
@@ -48,9 +48,17 @@ export class RenegociacoesService {
         data: { status: 'cancelado' },
       });
 
+      const n = dto.numeroParcelas;
       const taxaMensal = dto.taxaJuros / 100;
-      const totalComJuros = saldoDevedor * (1 + taxaMensal * dto.numeroParcelas);
-      const valorParcela = Math.round((totalComJuros / dto.numeroParcelas) * 100) / 100;
+      const totalComJuros = saldoDevedor * (1 + taxaMensal * n);
+      const valorParcela = Math.round((totalComJuros / n) * 100) / 100;
+      const encargos = totalComJuros - saldoDevedor;
+
+      // Split: capital = saldo renegociado / n | lucro = encargos / n
+      const principalPaybackBase = Math.floor((saldoDevedor / n) * 100) / 100;
+      const netGainBase          = Math.floor((encargos / n) * 100) / 100;
+      const ajustePrincipal = Math.round((saldoDevedor - principalPaybackBase * n) * 100) / 100;
+      const ajusteGain      = Math.round((encargos - netGainBase * n) * 100) / 100;
 
       const currentMaxNumero = await tx.installment.aggregate({
         where: { loanId: dto.loanId },
@@ -58,15 +66,22 @@ export class RenegociacoesService {
       });
       const baseNumero = (currentMaxNumero._max.numero ?? 0) + 1;
 
-      const newInstallments = Array.from({ length: dto.numeroParcelas }, (_, i) => {
+      const newInstallments = Array.from({ length: n }, (_, i) => {
+        const isLast = i === n - 1;
         const dataVencimento = new Date(dto.dataInicio);
         dataVencimento.setMonth(dataVencimento.getMonth() + i);
         return {
-          loanId: dto.loanId,
-          numero: baseNumero + i,
-          valor: valorParcela,
+          loanId:            dto.loanId,
+          numero:            baseNumero + i,
+          installmentAmount: valorParcela,
+          principalPayback:  isLast
+            ? Math.round((principalPaybackBase + ajustePrincipal) * 100) / 100
+            : principalPaybackBase,
+          netGain: isLast
+            ? Math.round((netGainBase + ajusteGain) * 100) / 100
+            : netGainBase,
           dataVencimento,
-          status: 'pendente' as const,
+          status:   'pendente' as const,
           totalPago: 0,
         };
       });

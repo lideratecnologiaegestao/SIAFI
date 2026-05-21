@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Save, Upload, X } from 'lucide-react'
@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
+import { useAuth } from '@/contexts/auth.context'
 import api from '@/lib/api'
 
 function formatCpfCnpj(raw: string): string {
@@ -50,6 +51,7 @@ const schema = z.object({
   estado: z.string().max(2).optional(),
   cep: z.string().optional(),
   observacoes: z.string().optional(),
+  consultorId: z.string().optional(),
 })
 
 type FormData = z.infer<typeof schema>
@@ -109,9 +111,18 @@ function FileInput({
 export default function NovoClientePage() {
   const router = useRouter()
   const qc = useQueryClient()
+  const { user } = useAuth()
   const [foto, setFoto] = useState<File | null>(null)
   const [rgFile, setRgFile] = useState<File | null>(null)
   const [comprovante, setComprovante] = useState<File | null>(null)
+
+  const canAssignConsultor = user?.role === 'admin' || user?.role === 'financeiro'
+
+  const { data: consultores } = useQuery<{ id: number; nome: string }[]>({
+    queryKey: ['consultores'],
+    queryFn: () => api.get('/clients/consultores').then((r) => r.data),
+    enabled: canAssignConsultor,
+  })
 
   const { register, handleSubmit, control, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
@@ -120,7 +131,12 @@ export default function NovoClientePage() {
   const mutation = useMutation({
     mutationFn: (data: FormData) => {
       const fd = new FormData()
-      Object.entries(data).forEach(([k, v]) => { if (v !== undefined && v !== '') fd.append(k, String(v)) })
+      Object.entries(data).forEach(([k, v]) => {
+        if (v !== undefined && v !== '') {
+          if (k === 'consultorId') fd.append(k, v)
+          else fd.append(k, String(v))
+        }
+      })
       if (foto) fd.append('foto', foto)
       if (rgFile) fd.append('rg', rgFile)
       if (comprovante) fd.append('comprovante', comprovante)
@@ -203,6 +219,17 @@ export default function NovoClientePage() {
               <Label htmlFor="telefone">Telefone</Label>
               <Input id="telefone" {...register('telefone')} placeholder="(00) 0000-0000" />
             </div>
+            {canAssignConsultor && (
+              <div className="space-y-1.5">
+                <Label htmlFor="consultorId">Consultor responsável</Label>
+                <Select id="consultorId" {...register('consultorId')}>
+                  <option value="">Sem consultor</option>
+                  {consultores?.map((c) => (
+                    <option key={c.id} value={String(c.id)}>{c.nome}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
           </CardContent>
         </Card>
 

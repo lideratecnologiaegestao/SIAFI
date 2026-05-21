@@ -37,8 +37,8 @@ function getInitials(nome: string) {
 const roleLabel: Record<string, string> = {
   admin: 'Administrador',
   financeiro: 'Financeiro',
+  consultor: 'Consultor',
   caixa: 'Caixa',
-  usuario: 'Usuário',
   cliente: 'Cliente',
 }
 
