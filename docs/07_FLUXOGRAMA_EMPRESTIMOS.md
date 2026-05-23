@@ -6,6 +6,14 @@ Este documento descreve o ciclo de vida completo de um contrato de empréstimo n
 
 ---
 
+## Fluxo Interativo (HTML)
+
+<iframe src="../siafi_fluxograma.html" width="100%" height="800px" style="border: 1px solid #ddd; border-radius: 8px; margin-bottom: 24px;"></iframe>
+
+[Abrir fluxograma interativo em tela cheia](../siafi_fluxograma.html){:target="_blank"}
+
+---
+
 ## Fluxo Completo (Mermaid)
 
 ```mermaid
