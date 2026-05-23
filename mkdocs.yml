@@ -1,0 +1,51 @@
+site_name: SIAFI 2.0 Docs
+site_description: Documentação Oficial do Sistema Integrado de Administração Financeira
+site_author: Lidera Tecnologia e Gestão
+
+theme:
+  name: material
+  language: pt-BR
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Mudar para modo escuro
+    # Palette toggle for dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Mudar para modo claro
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+
+nav:
+  - Início: index.md
+  - Visão Geral:
+      - Arquitetura: 01_ARQUITETURA.md
+      - Backend: 02_BACKEND.md
+      - Frontend: 03_FRONTEND.md
+      - Banco de Dados: 04_DATABASE.md
+  - Uso e Operação:
+      - Manual do Usuário: 05_MANUAL_USUARIO.md
+      - Apresentação Comercial: 06_APRESENTACAO.md
+      - Fluxograma de Empréstimos: 07_FLUXOGRAMA_EMPRESTIMOS.md
