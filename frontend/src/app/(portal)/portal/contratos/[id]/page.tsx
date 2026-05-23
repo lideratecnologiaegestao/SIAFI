@@ -113,7 +113,7 @@ export default function ContratoDetalhePage() {
     <div className="portal-page" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Back + título */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <Link href="/portal/contratos" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '8px', border: '1px solid var(--portal-gray-300)', background: 'var(--portal-white)', color: 'var(--portal-gray-600)' }}>
+        <Link href="/portal/contratos" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '44px', height: '44px', borderRadius: '8px', border: '1px solid var(--portal-gray-300)', background: 'var(--portal-white)', color: 'var(--portal-gray-600)' }}>
           <ArrowLeft size={18} />
         </Link>
         <div style={{ flex: 1 }}>

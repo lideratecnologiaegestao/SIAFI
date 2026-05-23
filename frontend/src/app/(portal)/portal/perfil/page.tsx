@@ -137,27 +137,41 @@ export default function PerfilPage() {
         disabled={disabled}
         style={{
           width: '44px',
-          height: '26px',
+          height: '44px',
           borderRadius: '999px',
           border: 'none',
-          background: checked ? 'var(--portal-blue-600)' : 'var(--portal-gray-300)',
+          background: 'transparent',
           cursor: disabled ? 'not-allowed' : 'pointer',
-          transition: 'background 200ms ease',
           position: 'relative',
           flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 0,
         }}
       >
         <span style={{
-          position: 'absolute',
-          top: '3px',
-          left: checked ? '21px' : '3px',
-          width: '20px',
-          height: '20px',
-          borderRadius: '50%',
-          background: '#fff',
-          boxShadow: '0 1px 4px rgba(0,0,0,.2)',
-          transition: 'left 200ms ease',
-        }} />
+          display: 'block',
+          width: '44px',
+          height: '26px',
+          borderRadius: '999px',
+          background: checked ? 'var(--portal-blue-600)' : 'var(--portal-gray-300)',
+          transition: 'background 200ms ease',
+          position: 'relative',
+          flexShrink: 0,
+        }}>
+          <span style={{
+            position: 'absolute',
+            top: '3px',
+            left: checked ? '21px' : '3px',
+            width: '20px',
+            height: '20px',
+            borderRadius: '50%',
+            background: '#fff',
+            boxShadow: '0 1px 4px rgba(0,0,0,.2)',
+            transition: 'left 200ms ease',
+          }} />
+        </span>
       </button>
     )
   }
@@ -396,7 +410,7 @@ export default function PerfilPage() {
                     tabIndex={-1}
                     style={{
                       position: 'absolute',
-                      right: '12px',
+                      right: '4px',
                       top: '50%',
                       transform: 'translateY(-50%)',
                       background: 'none',
@@ -404,7 +418,11 @@ export default function PerfilPage() {
                       color: 'var(--portal-gray-600)',
                       cursor: 'pointer',
                       display: 'flex',
-                      padding: '4px',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '40px',
+                      height: '40px',
+                      padding: 0,
                     }}
                   >
                     {field.show ? <EyeOff size={16} /> : <Eye size={16} />}

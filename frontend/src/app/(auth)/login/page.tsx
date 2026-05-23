@@ -235,6 +235,16 @@ export default function LoginPage() {
           <br />
           Lidera &copy; {new Date().getFullYear()}
         </p>
+
+        <div className="mt-4 pt-4 border-t text-center">
+          <p className="text-xs text-muted-foreground mb-1">É cliente Lidera?</p>
+          <a
+            href="https://financeiro.lidera.app.br/portal/login"
+            className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+          >
+            Acessar Portal do Cliente →
+          </a>
+        </div>
       </CardContent>
     </Card>
   )
