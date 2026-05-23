@@ -134,7 +134,7 @@ export default function RedefinirSenhaPage() {
 
     getSupabaseBrowserClient()
       .auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-      .then(({ error }) => { setEstado(error ? 'link_invalido' : 'formulario') })
+      .then(({ error }: { error: unknown }) => { setEstado(error ? 'link_invalido' : 'formulario') })
       .catch(() => setEstado('link_invalido'))
   }, [])
 

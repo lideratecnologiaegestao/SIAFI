@@ -2,69 +2,104 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { AlertTriangle, Clock, CreditCard, CheckCircle, ChevronRight, ShieldAlert, FileSignature } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { AlertTriangle, Clock, ShieldAlert, FileSignature, ChevronRight, QrCode, CheckCircle2 } from 'lucide-react'
 import { portalClient } from '@/lib/portal/portal-client'
+import { usePortalAuth } from '@/contexts/portal-auth.context'
+import { MoneyDisplay, MoneyDisplaySkeleton } from '@/components/portal/money-display'
+import { ProgressBar } from '@/components/portal/progress-bar'
+import { LoanStatusBadge } from '@/components/portal/status-badges'
+import { ScoreIndicator } from '@/components/portal/score-indicator'
+import { SkeletonHero, SkeletonContractCard, SkeletonListItem } from '@/components/portal/skeleton-card'
 
 interface Alerta {
-  tipo: 'atrasado' | 'vencendo' | 'mfa'
+  tipo: 'atrasado' | 'vencendo' | 'em_dia' | 'mfa'
   mensagem: string
   loanId?: number
+  installmentId?: number
 }
 
-interface Pagamento {
-  id: number
-  valor: number
-  dataPagamento: string
-  numeroParcela: number
-  loanId: number
-  metodoPagamento: string
-}
-
-interface ContratoPendenteAceite {
+interface ContratoPendente {
   id: number
   valor: number
   numeroParcelas: number
   aceiteExpiraEm: string | null
 }
 
+interface ContratoAtivo {
+  id: number
+  valor: number
+  numeroParcelas: number
+  dataInicio: string
+  status: string
+  percentualPago: number
+  totalPago: number
+  proximaParcela: { id: number; valor: number; dataVencimento: string } | null
+}
+
+interface UltimoPagamento {
+  id: number
+  valor: number
+  dataPagamento: string
+  metodoPagamento: string
+  numeroParcela: number
+  loanId: number
+}
+
 interface HomeData {
   contratosAtivos: number
-  contratosPendentesAceite: ContratoPendenteAceite[]
+  contratosPendentesAceite?: ContratoPendente[]
+  contratosAtivosLista?: ContratoAtivo[]
   proximaParcela: { valor: number; dataVencimento: string; installmentId: number } | null
   totalEmAberto: number
-  ultimosPagamentos: Pagamento[]
+  ultimosPagamentos: UltimoPagamento[]
   alerta: Alerta | null
+  score?: number
 }
 
 const METODOS: Record<string, string> = {
-  pix: 'PIX',
-  dinheiro: 'Dinheiro',
-  cartao: 'Cartão',
-  transferencia: 'Transferência',
-  cheque: 'Cheque',
-  mercadopago: 'Mercado Pago',
+  pix: 'PIX', dinheiro: 'Dinheiro', cartao: 'Cartão',
+  transferencia: 'Transferência', cheque: 'Cheque', mercadopago: 'Mercado Pago',
+}
+
+function fmtCurrency(v: number) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
+}
+
+function fmtDate(s: string) {
+  return new Date(s + 'T00:00:00').toLocaleDateString('pt-BR')
+}
+
+function getProgressColor(status: string, proximaData?: string): 'green' | 'amber' | 'red' {
+  if (status === 'inadimplente') return 'red'
+  if (!proximaData) return 'green'
+  const dias = Math.floor((new Date(proximaData).getTime() - Date.now()) / 86_400_000)
+  if (dias < 0) return 'red'
+  if (dias <= 5) return 'amber'
+  return 'green'
 }
 
 export default function PortalHomePage() {
+  const { user } = usePortalAuth()
   const { data, isLoading } = useQuery<HomeData>({
     queryKey: ['portal-home'],
     queryFn: () => portalClient.get('/portal/home').then(r => r.data),
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
   })
 
+  const primeiroNome = user?.nome?.split(' ')[0] ?? ''
+
+  /* ── Loading ── */
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-20 w-full" />
-        <div className="grid grid-cols-2 gap-3">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
+      <div className="portal-page" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <SkeletonHero />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {[1, 2].map(i => <SkeletonContractCard key={i} />)}
         </div>
-        <Skeleton className="h-48 w-full" />
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {[1, 2, 3].map(i => <SkeletonListItem key={i} />)}
+        </div>
       </div>
     )
   }
@@ -72,145 +107,354 @@ export default function PortalHomePage() {
   const d = data
 
   return (
-    <div className="space-y-5">
-      {/* Contratos aguardando aceite — ação urgente */}
-      {d?.contratosPendentesAceite?.map(c => (
-        <div key={c.id} className="rounded-xl border-2 border-orange-300 bg-orange-50 px-4 py-4 space-y-3">
-          <div className="flex items-center gap-2 font-semibold text-orange-900 text-sm">
-            <FileSignature className="size-4 shrink-0" />
-            Proposta aguardando sua assinatura
-          </div>
-          <div className="text-sm text-orange-800 space-y-0.5">
-            <p>Valor: <span className="font-medium">{formatCurrency(c.valor)}</span> · {c.numeroParcelas} parcelas</p>
-            {c.aceiteExpiraEm && (
-              <p className="text-xs">Prazo para aceite: {formatDate(c.aceiteExpiraEm)}</p>
-            )}
-          </div>
-          <Link href={`/portal/contratos/${c.id}`}>
-            <Button className="w-full bg-orange-600 hover:bg-orange-700 text-white h-9 text-sm">
-              Ver proposta e assinar
-            </Button>
-          </Link>
-        </div>
-      ))}
+    <div className="portal-page" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-      {/* Alerta */}
-      {d?.alerta && (
-        <div className={`rounded-xl border px-4 py-3 flex items-start gap-3 text-sm ${
-          d.alerta.tipo === 'atrasado'
-            ? 'bg-red-50 border-red-200 text-red-800'
-            : d.alerta.tipo === 'vencendo'
-            ? 'bg-amber-50 border-amber-200 text-amber-800'
-            : 'bg-blue-50 border-blue-200 text-blue-800'
-        }`}>
-          {d.alerta.tipo === 'atrasado' ? <AlertTriangle className="size-4 mt-0.5 shrink-0" />
-            : d.alerta.tipo === 'vencendo' ? <Clock className="size-4 mt-0.5 shrink-0" />
-            : <ShieldAlert className="size-4 mt-0.5 shrink-0" />}
-          <div className="flex-1">
-            <p>{d.alerta.mensagem}</p>
-            {d.alerta.loanId && (
-              <Link href={`/portal/contratos/${d.alerta.loanId}`} className="text-xs font-medium underline mt-1 block">
-                Ver contrato
-              </Link>
-            )}
+      {/* ── Hero Card ─────────────────────────────────── */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, var(--portal-blue-900) 0%, var(--portal-blue-800) 100%)',
+          borderRadius: 'var(--portal-radius-card)',
+          padding: '24px',
+          boxShadow: 'var(--portal-shadow-elevated)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '20px',
+        }}
+      >
+        {/* Saudação */}
+        <div>
+          <p style={{
+            fontSize: '20px',
+            fontWeight: 600,
+            color: '#FFFFFF',
+            fontFamily: 'var(--font-dm-sans, sans-serif)',
+            lineHeight: 1.2,
+          }}>
+            Olá, {primeiroNome}! 👋
+          </p>
+          <p style={{ fontSize: '13px', color: 'rgba(255,255,255,.6)', marginTop: '2px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+            {d?.alerta?.tipo === 'em_dia' || !d?.alerta
+              ? 'Tudo em dia com seus contratos.'
+              : 'Veja o alerta abaixo sobre seus contratos.'}
+          </p>
+        </div>
+
+        {/* Mini-cards de resumo */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <div style={{ background: 'rgba(255,255,255,.08)', borderRadius: '10px', padding: '14px' }}>
+            <MoneyDisplay
+              value={d?.totalEmAberto ?? 0}
+              size="md"
+              color="white"
+              label="Total em aberto"
+            />
+          </div>
+          <div style={{ background: 'rgba(255,255,255,.08)', borderRadius: '10px', padding: '14px' }}>
+            <p style={{ fontSize: '11px', color: 'rgba(255,255,255,.6)', marginBottom: '2px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+              Contratos ativos
+            </p>
+            <p style={{
+              fontSize: '20px',
+              fontFamily: 'var(--font-dm-serif, Georgia, serif)',
+              color: '#FFFFFF',
+              lineHeight: 1.1,
+            }}>
+              {d?.contratosAtivos ?? 0}
+            </p>
           </div>
         </div>
-      )}
 
-      {/* Cards de resumo */}
-      <div className="grid grid-cols-2 gap-3">
-        <Card>
-          <CardContent className="pt-4 pb-4 space-y-1">
-            <p className="text-xs text-muted-foreground">Contratos ativos</p>
-            <p className="text-2xl font-bold">{d?.contratosAtivos ?? '—'}</p>
-            <Link href="/portal/contratos" className="text-xs text-blue-600 flex items-center gap-0.5">
-              Ver contratos <ChevronRight className="size-3" />
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-4 space-y-1">
-            <p className="text-xs text-muted-foreground">Total em aberto</p>
-            <p className="text-2xl font-bold">{d ? formatCurrency(d.totalEmAberto) : '—'}</p>
-            <Link href="/portal/pagamentos" className="text-xs text-blue-600 flex items-center gap-0.5">
-              Histórico <ChevronRight className="size-3" />
-            </Link>
-          </CardContent>
-        </Card>
+        {/* Score — exibido apenas quando disponível */}
+        {d?.score !== undefined && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,.6)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+              Score de pontualidade:
+            </p>
+            <ScoreIndicator score={d.score} size="sm" />
+          </div>
+        )}
       </div>
 
-      {/* Próxima parcela */}
-      {d?.proximaParcela && (
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Próxima parcela</p>
-                <p className="text-xl font-bold">{formatCurrency(d.proximaParcela.valor)}</p>
-                <p className="text-sm text-muted-foreground">Vence em {formatDate(d.proximaParcela.dataVencimento)}</p>
-              </div>
-              <Link href={`/portal/pagamentos/pix/${d.proximaParcela.installmentId}`}>
-                <Button size="sm" className="gap-1.5">
-                  <CreditCard className="size-3.5" />
-                  Pagar via PIX
-                </Button>
-              </Link>
+      {/* ── Contratos aguardando aceite ───────────────── */}
+      {d?.contratosPendentesAceite?.map(c => (
+        <Link key={c.id} href={`/portal/contratos/${c.id}`} style={{ textDecoration: 'none' }}>
+          <div
+            style={{
+              background: 'var(--portal-amber-100)',
+              border: '2px solid var(--portal-amber-600)',
+              borderRadius: 'var(--portal-radius-card)',
+              padding: '16px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              boxShadow: 'var(--portal-shadow-card)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FileSignature size={18} color="var(--portal-amber-600)" />
+              <p style={{ fontWeight: 600, color: 'var(--portal-amber-600)', fontSize: '14px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                Proposta aguardando sua assinatura
+              </p>
             </div>
-          </CardContent>
-        </Card>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <p style={{ fontSize: '13px', color: 'var(--portal-gray-800)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                  {fmtCurrency(c.valor)} · {c.numeroParcelas} parcelas
+                </p>
+                {c.aceiteExpiraEm && (
+                  <p style={{ fontSize: '11px', color: 'var(--portal-amber-600)', marginTop: '2px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                    Prazo: {fmtDate(c.aceiteExpiraEm)}
+                  </p>
+                )}
+              </div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'var(--portal-amber-600)',
+                color: '#fff',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                fontWeight: 600,
+                fontFamily: 'var(--font-dm-sans, sans-serif)',
+                whiteSpace: 'nowrap',
+              }}>
+                Assinar →
+              </div>
+            </div>
+          </div>
+        </Link>
+      ))}
+
+      {/* ── Alerta (atrasado / vencendo / mfa) ───────── */}
+      {d?.alerta && d.alerta.tipo !== 'em_dia' && (
+        <div style={{
+          background: d.alerta.tipo === 'atrasado' ? 'var(--portal-red-100)'
+            : d.alerta.tipo === 'mfa' ? 'var(--portal-blue-100)'
+            : 'var(--portal-amber-100)',
+          border: `1px solid ${d.alerta.tipo === 'atrasado' ? 'var(--portal-red-600)'
+            : d.alerta.tipo === 'mfa' ? 'var(--portal-blue-400)'
+            : 'var(--portal-amber-600)'}`,
+          borderRadius: 'var(--portal-radius-card)',
+          padding: '14px 16px',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '12px',
+          boxShadow: 'var(--portal-shadow-card)',
+        }}>
+          {d.alerta.tipo === 'atrasado' ? <AlertTriangle size={18} color="var(--portal-red-600)" style={{ flexShrink: 0, marginTop: 1 }} />
+            : d.alerta.tipo === 'mfa' ? <ShieldAlert size={18} color="var(--portal-blue-600)" style={{ flexShrink: 0, marginTop: 1 }} />
+            : <Clock size={18} color="var(--portal-amber-600)" style={{ flexShrink: 0, marginTop: 1 }} />
+          }
+          <div style={{ flex: 1 }}>
+            <p style={{
+              fontSize: '13px',
+              color: d.alerta.tipo === 'atrasado' ? 'var(--portal-red-600)'
+                : d.alerta.tipo === 'mfa' ? 'var(--portal-blue-600)'
+                : 'var(--portal-amber-600)',
+              fontFamily: 'var(--font-dm-sans, sans-serif)',
+              fontWeight: 500,
+            }}>
+              {d.alerta.mensagem}
+            </p>
+            {d.alerta.loanId && (
+              <Link href={`/portal/contratos/${d.alerta.loanId}`} style={{
+                fontSize: '12px',
+                color: 'var(--portal-blue-600)',
+                textDecoration: 'underline',
+                marginTop: '4px',
+                display: 'block',
+                fontFamily: 'var(--font-dm-sans, sans-serif)',
+              }}>
+                Ver contrato →
+              </Link>
+            )}
+            {d.alerta.tipo === 'mfa' && (
+              <Link href="/portal/mfa-setup" style={{
+                fontSize: '12px',
+                color: 'var(--portal-blue-600)',
+                textDecoration: 'underline',
+                marginTop: '4px',
+                display: 'block',
+                fontFamily: 'var(--font-dm-sans, sans-serif)',
+              }}>
+                Configurar autenticação →
+              </Link>
+            )}
+          </div>
+        </div>
       )}
 
-      {/* Últimos pagamentos */}
+      {/* ── Próxima parcela (CTA rápido) ─────────────── */}
+      {d?.proximaParcela && (
+        <div
+          style={{
+            background: 'var(--portal-white)',
+            borderRadius: 'var(--portal-radius-card)',
+            padding: '16px 20px',
+            boxShadow: 'var(--portal-shadow-card)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          <div>
+            <p style={{ fontSize: '11px', color: 'var(--portal-gray-600)', fontFamily: 'var(--font-dm-sans, sans-serif)', marginBottom: '2px' }}>
+              Próxima parcela
+            </p>
+            <MoneyDisplay value={d.proximaParcela.valor} size="lg" />
+            <p style={{ fontSize: '12px', color: 'var(--portal-gray-600)', marginTop: '3px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+              Vence {fmtDate(d.proximaParcela.dataVencimento)}
+            </p>
+          </div>
+          <Link href={`/portal/pagamentos/pix/${d.proximaParcela.installmentId}`} style={{ textDecoration: 'none', flexShrink: 0 }}>
+            <button style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'var(--portal-blue-600)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '12px 18px',
+              fontSize: '14px',
+              fontWeight: 600,
+              fontFamily: 'var(--font-dm-sans, sans-serif)',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}>
+              <QrCode size={16} />
+              Pagar PIX
+            </button>
+          </Link>
+        </div>
+      )}
+
+      {/* ── Contratos ativos ─────────────────────────── */}
+      {d?.contratosAtivosLista && d.contratosAtivosLista.length > 0 && (
+        <div>
+          <p style={{
+            fontSize: '13px',
+            fontWeight: 600,
+            color: 'var(--portal-gray-800)',
+            marginBottom: '10px',
+            fontFamily: 'var(--font-dm-sans, sans-serif)',
+          }}>
+            Meus contratos
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {d.contratosAtivosLista.map((c, idx) => {
+              const progColor = getProgressColor(c.status, c.proximaParcela?.dataVencimento)
+              return (
+                <Link key={c.id} href={`/portal/contratos/${c.id}`} style={{ textDecoration: 'none' }}>
+                  <div className="pcard pcard-clickable" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <p style={{ fontWeight: 600, fontSize: '14px', color: 'var(--portal-gray-950)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                        Contrato {idx + 1}
+                      </p>
+                      <LoanStatusBadge status={c.status} />
+                    </div>
+                    <MoneyDisplay value={c.valor} size="md" label="Valor emprestado" />
+                    <ProgressBar
+                      value={c.percentualPago}
+                      color={progColor}
+                      animated
+                      label={`${c.percentualPago}% pago · ${Math.round((c.percentualPago / 100) * c.numeroParcelas)} de ${c.numeroParcelas} parcelas`}
+                    />
+                    {c.proximaParcela && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '8px', borderTop: '1px solid var(--portal-gray-100)' }}>
+                        <p style={{ fontSize: '12px', color: 'var(--portal-gray-600)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                          Próximo vencimento: {fmtDate(c.proximaParcela.dataVencimento)}
+                        </p>
+                        <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--portal-gray-800)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                          {fmtCurrency(c.proximaParcela.valor)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Empty state (sem contratos) ───────────────── */}
+      {!isLoading && d?.contratosAtivos === 0 && (
+        <div style={{
+          background: 'var(--portal-white)',
+          borderRadius: 'var(--portal-radius-card)',
+          padding: '40px 24px',
+          boxShadow: 'var(--portal-shadow-card)',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          <FileSignature size={36} color="var(--portal-gray-300)" />
+          <p style={{ fontWeight: 600, fontSize: '15px', color: 'var(--portal-gray-800)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+            Nenhum contrato ativo
+          </p>
+          <p style={{ fontSize: '13px', color: 'var(--portal-gray-600)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+            Fale com seu consultor para iniciar um novo contrato.
+          </p>
+        </div>
+      )}
+
+      {/* ── Últimos pagamentos ────────────────────────── */}
       {d?.ultimosPagamentos && d.ultimosPagamentos.length > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-sm">Últimos pagamentos</h2>
-            <Link href="/portal/pagamentos" className="text-xs text-blue-600">Ver todos</Link>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--portal-gray-800)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+              Últimos pagamentos
+            </p>
+            <Link href="/portal/pagamentos" style={{ fontSize: '12px', color: 'var(--portal-blue-600)', textDecoration: 'none', fontFamily: 'var(--font-dm-sans, sans-serif)', fontWeight: 500 }}>
+              Ver todos →
+            </Link>
           </div>
-          <div className="space-y-2">
-            {d.ultimosPagamentos.map(p => (
-              <div key={p.id} className="flex items-center justify-between bg-white rounded-lg border px-4 py-3 text-sm">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="size-4 text-green-500 shrink-0" />
+          <div style={{ background: 'var(--portal-white)', borderRadius: 'var(--portal-radius-card)', boxShadow: 'var(--portal-shadow-card)', overflow: 'hidden' }}>
+            {d.ultimosPagamentos.slice(0, 4).map((p, idx) => (
+              <div
+                key={p.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '14px 18px',
+                  borderBottom: idx < Math.min(d.ultimosPagamentos.length, 4) - 1 ? '1px solid var(--portal-gray-100)' : 'none',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: 'var(--portal-green-100)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>
+                    <CheckCircle2 size={16} color="var(--portal-green-600)" />
+                  </div>
                   <div>
-                    <p className="font-medium">Parcela {p.numeroParcela}</p>
-                    <p className="text-xs text-muted-foreground">{formatDate(p.dataPagamento)} · {METODOS[p.metodoPagamento] ?? p.metodoPagamento}</p>
+                    <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--portal-gray-950)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                      Parcela {p.numeroParcela}
+                    </p>
+                    <p style={{ fontSize: '11px', color: 'var(--portal-gray-600)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                      {fmtDate(p.dataPagamento)} · {METODOS[p.metodoPagamento] ?? p.metodoPagamento}
+                    </p>
                   </div>
                 </div>
-                <p className="font-semibold text-green-700">{formatCurrency(p.valor)}</p>
+                <MoneyDisplay value={p.valor} size="sm" color="green" />
               </div>
             ))}
           </div>
         </div>
       )}
-
-      {/* Navegação rápida */}
-      <div className="grid grid-cols-2 gap-3 pt-2">
-        <Link href="/portal/contratos">
-          <button className="w-full text-left bg-white rounded-xl border px-4 py-3 hover:bg-muted/30 transition-colors">
-            <p className="font-medium text-sm">Meus Contratos</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Parcelas e status</p>
-          </button>
-        </Link>
-        <Link href="/portal/suporte">
-          <button className="w-full text-left bg-white rounded-xl border px-4 py-3 hover:bg-muted/30 transition-colors">
-            <p className="font-medium text-sm">Suporte</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Abrir chamado</p>
-          </button>
-        </Link>
-        <Link href="/portal/perfil">
-          <button className="w-full text-left bg-white rounded-xl border px-4 py-3 hover:bg-muted/30 transition-colors">
-            <p className="font-medium text-sm">Meu Perfil</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Dados e segurança</p>
-          </button>
-        </Link>
-        <Link href="/portal/pagamentos">
-          <button className="w-full text-left bg-white rounded-xl border px-4 py-3 hover:bg-muted/30 transition-colors">
-            <p className="font-medium text-sm">Pagamentos</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Histórico completo</p>
-          </button>
-        </Link>
-      </div>
     </div>
   )
 }

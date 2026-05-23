@@ -115,4 +115,5 @@ export interface PortalPerfil {
   notificacoesWhatsapp: boolean
   senhaTemporaria: boolean
   primeiroAcesso: boolean
+  score?: number
 }

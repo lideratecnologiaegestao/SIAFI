@@ -1,84 +1,184 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeft, Plus, MessageSquare } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Plus, MessageCircle, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { usePortalTickets } from '@/hooks/portal/use-portal-suporte'
+import { SkeletonTicketCard } from '@/components/portal/skeleton-card'
 
-const STATUS_TICKET: Record<string, { label: string; variant: 'outline' | 'secondary' | 'success' | 'destructive' }> = {
-  aberto: { label: 'Aguardando', variant: 'outline' },
-  respondido: { label: 'Respondido', variant: 'secondary' },
-  fechado: { label: 'Resolvido', variant: 'success' },
-  resolvido: { label: 'Resolvido', variant: 'success' },
+const STATUS_CFG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
+  aberto: {
+    label: 'Aguardando',
+    color: 'var(--portal-blue-600)',
+    bg: 'var(--portal-blue-100)',
+    icon: <Clock size={13} />,
+  },
+  respondido: {
+    label: 'Respondido',
+    color: 'var(--portal-green-600)',
+    bg: 'var(--portal-green-100)',
+    icon: <CheckCircle2 size={13} />,
+  },
+  fechado: {
+    label: 'Resolvido',
+    color: 'var(--portal-gray-600)',
+    bg: 'var(--portal-gray-100)',
+    icon: <CheckCircle2 size={13} />,
+  },
+  resolvido: {
+    label: 'Resolvido',
+    color: 'var(--portal-gray-600)',
+    bg: 'var(--portal-gray-100)',
+    icon: <CheckCircle2 size={13} />,
+  },
 }
 
 export default function SuportePage() {
   const { data, isLoading } = usePortalTickets()
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Link href="/portal">
-          <button className="text-muted-foreground hover:text-foreground" aria-label="Voltar">
-            <ArrowLeft className="size-5" />
+    <div className="portal-page" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Título + botão novo */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--portal-gray-950)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+          Suporte
+        </h1>
+        <Link href="/portal/suporte/novo" style={{ textDecoration: 'none' }}>
+          <button style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '10px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            background: 'var(--portal-blue-600)',
+            color: '#fff',
+            fontSize: '14px',
+            fontWeight: 600,
+            fontFamily: 'var(--font-dm-sans, sans-serif)',
+            cursor: 'pointer',
+          }}>
+            <Plus size={15} />
+            Novo chamado
           </button>
-        </Link>
-        <h1 className="text-xl font-bold">Suporte</h1>
-        <Link href="/portal/suporte/novo" className="ml-auto">
-          <Button size="sm" className="gap-1.5">
-            <Plus className="size-3.5" />Novo chamado
-          </Button>
         </Link>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-3">
-          {[1, 2].map(i => <Skeleton key={i} className="h-24 w-full" />)}
+      {/* Loading */}
+      {isLoading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {[1, 2, 3].map(i => <SkeletonTicketCard key={i} />)}
         </div>
-      ) : !data?.length ? (
-        <Card>
-          <CardContent className="py-12 text-center space-y-3">
-            <MessageSquare className="size-10 mx-auto text-muted-foreground" />
-            <p className="text-muted-foreground text-sm">Nenhum chamado aberto.</p>
-            <Link href="/portal/suporte/novo">
-              <Button size="sm">Abrir meu primeiro chamado</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
+      )}
+
+      {/* Empty state */}
+      {!isLoading && !data?.length && (
+        <div className="pcard" style={{
+          padding: '48px 24px',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'var(--portal-green-100)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <MessageCircle size={28} color="var(--portal-green-600)" />
+          </div>
+          <div>
+            <p style={{ fontWeight: 700, fontSize: '16px', color: 'var(--portal-gray-950)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+              Tudo certo!
+            </p>
+            <p style={{ fontSize: '13px', color: 'var(--portal-gray-600)', marginTop: '4px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+              Sem chamados abertos. Tem alguma dúvida?
+            </p>
+          </div>
+          <Link href="/portal/suporte/novo" style={{ textDecoration: 'none' }}>
+            <button style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: 'var(--portal-blue-600)',
+              color: '#fff',
+              fontSize: '14px',
+              fontWeight: 600,
+              fontFamily: 'var(--font-dm-sans, sans-serif)',
+              cursor: 'pointer',
+            }}>
+              Abrir chamado
+            </button>
+          </Link>
+        </div>
+      )}
+
+      {/* Lista de chamados */}
+      {!isLoading && data && data.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {data.map(t => {
-            const st = STATUS_TICKET[t.status] ?? { label: t.status, variant: 'outline' as const }
+            const cfg = STATUS_CFG[t.status] ?? STATUS_CFG.aberto
             const naoLido = t.status === 'respondido' && !t.lido
+
             return (
-              <Link key={t.id} href={`/portal/suporte/${t.id}`}>
-                <Card className={`hover:bg-muted/20 transition-colors cursor-pointer ${naoLido ? 'border-blue-300 bg-blue-50/30' : ''}`}>
-                  <CardContent className="pt-4 pb-4 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {naoLido && (
-                            <span className="size-2 rounded-full bg-blue-600 shrink-0" aria-label="Não lido" />
-                          )}
-                          <p className="font-medium text-sm truncate">{t.assunto}</p>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          #{t.id} · Aberto em {formatDate(t.createdAt)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {naoLido && (
-                          <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">Novo</span>
-                        )}
-                        <Badge variant={st.variant}>{st.label}</Badge>
-                      </div>
+              <Link key={t.id} href={`/portal/suporte/${t.id}`} style={{ textDecoration: 'none' }}>
+                <div
+                  className="pcard-clickable"
+                  style={{
+                    background: naoLido ? 'var(--portal-blue-100)' : 'var(--portal-white)',
+                    borderRadius: 'var(--portal-radius-card)',
+                    borderLeft: `4px solid ${naoLido ? 'var(--portal-blue-600)' : cfg.color}`,
+                    boxShadow: 'var(--portal-shadow-card)',
+                    padding: '16px 18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
+                      {naoLido && (
+                        <span style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: 'var(--portal-blue-600)',
+                          flexShrink: 0,
+                        }} />
+                      )}
+                      <p style={{
+                        fontSize: '14px',
+                        fontWeight: naoLido ? 700 : 600,
+                        color: 'var(--portal-gray-950)',
+                        fontFamily: 'var(--font-dm-sans, sans-serif)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {t.assunto}
+                      </p>
                     </div>
-                  </CardContent>
-                </Card>
+                    <p style={{ fontSize: '11px', color: 'var(--portal-gray-600)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                      #{t.id} · {formatDate(t.createdAt)}
+                    </p>
+                  </div>
+
+                  <div style={{ flexShrink: 0 }}>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '4px 10px',
+                      borderRadius: '999px',
+                      background: cfg.bg,
+                      color: cfg.color,
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      fontFamily: 'var(--font-dm-sans, sans-serif)',
+                    }}>
+                      {cfg.icon}
+                      {naoLido ? 'Novo!' : cfg.label}
+                    </span>
+                  </div>
+                </div>
               </Link>
             )
           })}

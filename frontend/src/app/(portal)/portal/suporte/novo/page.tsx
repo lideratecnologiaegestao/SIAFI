@@ -1,16 +1,12 @@
 'use client'
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, Loader2 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { ArrowLeft, Loader2, Send } from 'lucide-react'
 import { portalApi } from '@/lib/portal/portal-api'
 
 const ASSUNTOS = [
@@ -22,20 +18,38 @@ const ASSUNTOS = [
 ]
 
 const schema = z.object({
-  assunto: z.string().min(1, 'Selecione ou informe um assunto'),
-  mensagem: z.string().min(10, 'Mensagem muito curta').max(500, 'Máximo 500 caracteres'),
+  assunto: z.string().min(1, 'Selecione um assunto'),
+  mensagem: z.string().min(10, 'Mensagem muito curta (mínimo 10 caracteres)').max(500, 'Máximo 500 caracteres'),
 })
 
 type FormData = z.infer<typeof schema>
 
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '12px 14px',
+  borderRadius: '8px',
+  border: '1px solid var(--portal-gray-300)',
+  background: 'var(--portal-white)',
+  fontSize: '14px',
+  fontFamily: 'var(--font-dm-sans, sans-serif)',
+  color: 'var(--portal-gray-950)',
+  appearance: 'none',
+  outline: 'none',
+  boxSizing: 'border-box',
+}
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  fontSize: '13px',
+  fontWeight: 600,
+  color: 'var(--portal-gray-800)',
+  marginBottom: '6px',
+  fontFamily: 'var(--font-dm-sans, sans-serif)',
+}
+
 export default function NovoTicketPage() {
   const router = useRouter()
   const qc = useQueryClient()
-
-  const { data: contratos } = useQuery({
-    queryKey: ['portal', 'contratos'],
-    queryFn: portalApi.getContratos,
-  })
 
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
@@ -56,69 +70,132 @@ export default function NovoTicketPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Link href="/portal/suporte">
-          <button className="text-muted-foreground hover:text-foreground" aria-label="Voltar">
-            <ArrowLeft className="size-5" />
-          </button>
+    <div className="portal-page" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <Link href="/portal/suporte" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '8px', border: '1px solid var(--portal-gray-300)', background: 'var(--portal-white)', color: 'var(--portal-gray-600)' }}>
+          <ArrowLeft size={18} />
         </Link>
-        <h1 className="text-xl font-bold">Novo Chamado</h1>
+        <h1 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--portal-gray-950)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+          Novo chamado
+        </h1>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Descreva sua dúvida ou problema</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="assunto">Assunto *</Label>
-              <select
-                id="assunto"
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                {...register('assunto')}
-              >
-                <option value="">Selecione o assunto</option>
-                {ASSUNTOS.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-              {errors.assunto && <p className="text-xs text-destructive">{errors.assunto.message}</p>}
-            </div>
+      {/* Formulário */}
+      <div className="pcard" style={{ padding: '24px' }}>
+        <p style={{ fontSize: '14px', color: 'var(--portal-gray-600)', fontFamily: 'var(--font-dm-sans, sans-serif)', marginBottom: '20px' }}>
+          Descreva sua dúvida ou problema e nossa equipe responderá em breve.
+        </p>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="mensagem">Mensagem *</Label>
-                <span className={`text-xs ${mensagemLen > 480 ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                  {mensagemLen} / 500
-                </span>
-              </div>
-              <Textarea
-                id="mensagem"
-                rows={5}
-                placeholder="Descreva detalhadamente sua dúvida ou problema..."
-                {...register('mensagem')}
-              />
-              {errors.mensagem && <p className="text-xs text-destructive">{errors.mensagem.message}</p>}
-            </div>
-
-            {mutation.isError && (
-              <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2">
-                <p className="text-sm text-destructive">Erro ao enviar chamado. Tente novamente.</p>
-              </div>
+        <form onSubmit={handleSubmit(onSubmit)} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Assunto */}
+          <div>
+            <label style={labelStyle}>Assunto *</label>
+            <select
+              {...register('assunto')}
+              style={{ ...inputStyle, cursor: 'pointer' }}
+            >
+              <option value="">Selecione o assunto...</option>
+              {ASSUNTOS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            {errors.assunto && (
+              <p style={{ fontSize: '12px', color: 'var(--portal-red-600)', marginTop: '4px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                {errors.assunto.message}
+              </p>
             )}
+          </div>
 
-            <div className="flex gap-2">
-              <Link href="/portal/suporte" className="flex-1">
-                <Button type="button" variant="outline" className="w-full">Cancelar</Button>
-              </Link>
-              <Button type="submit" className="flex-1" disabled={isSubmitting || mutation.isPending}>
-                {(isSubmitting || mutation.isPending) && <Loader2 className="size-4 animate-spin mr-2" />}
-                Enviar chamado
-              </Button>
+          {/* Mensagem */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Mensagem *</label>
+              <span style={{
+                fontSize: '11px',
+                color: mensagemLen > 480 ? 'var(--portal-amber-600)' : 'var(--portal-gray-600)',
+                fontFamily: 'var(--font-dm-sans, sans-serif)',
+                fontWeight: mensagemLen > 480 ? 600 : 400,
+              }}>
+                {mensagemLen}/500
+              </span>
             </div>
-          </form>
-        </CardContent>
-      </Card>
+            <textarea
+              {...register('mensagem')}
+              rows={5}
+              placeholder="Descreva detalhadamente sua dúvida ou problema..."
+              style={{
+                ...inputStyle,
+                resize: 'vertical',
+                minHeight: '120px',
+              }}
+            />
+            {errors.mensagem && (
+              <p style={{ fontSize: '12px', color: 'var(--portal-red-600)', marginTop: '4px', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                {errors.mensagem.message}
+              </p>
+            )}
+          </div>
+
+          {/* Erro de envio */}
+          {mutation.isError && (
+            <div style={{
+              padding: '12px 14px',
+              borderRadius: '8px',
+              background: 'var(--portal-red-100)',
+              border: '1px solid var(--portal-red-600)',
+            }}>
+              <p style={{ fontSize: '13px', color: 'var(--portal-red-600)', fontFamily: 'var(--font-dm-sans, sans-serif)' }}>
+                Erro ao enviar chamado. Por favor, tente novamente.
+              </p>
+            </div>
+          )}
+
+          {/* Botões */}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+            <Link href="/portal/suporte" style={{ flex: 1, textDecoration: 'none' }}>
+              <button type="button" style={{
+                width: '100%',
+                padding: '13px',
+                borderRadius: '10px',
+                border: '1px solid var(--portal-gray-300)',
+                background: 'var(--portal-white)',
+                color: 'var(--portal-gray-600)',
+                fontSize: '14px',
+                fontWeight: 500,
+                fontFamily: 'var(--font-dm-sans, sans-serif)',
+                cursor: 'pointer',
+              }}>
+                Cancelar
+              </button>
+            </Link>
+            <button
+              type="submit"
+              disabled={isSubmitting || mutation.isPending}
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '13px',
+                borderRadius: '10px',
+                border: 'none',
+                background: isSubmitting || mutation.isPending ? 'var(--portal-gray-300)' : 'var(--portal-blue-600)',
+                color: '#fff',
+                fontSize: '14px',
+                fontWeight: 700,
+                fontFamily: 'var(--font-dm-sans, sans-serif)',
+                cursor: isSubmitting || mutation.isPending ? 'not-allowed' : 'pointer',
+                transition: 'background 200ms ease',
+              }}
+            >
+              {(isSubmitting || mutation.isPending)
+                ? <><Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> Enviando...</>
+                : <><Send size={16} /> Enviar chamado</>
+              }
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
