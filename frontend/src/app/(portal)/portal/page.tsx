@@ -2,13 +2,13 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { AlertTriangle, Clock, CreditCard, CheckCircle, ChevronRight, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, Clock, CreditCard, CheckCircle, ChevronRight, ShieldAlert, FileSignature } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import api from '@/lib/api'
+import { portalClient } from '@/lib/portal/portal-client'
 
 interface Alerta {
   tipo: 'atrasado' | 'vencendo' | 'mfa'
@@ -25,8 +25,16 @@ interface Pagamento {
   metodoPagamento: string
 }
 
+interface ContratoPendenteAceite {
+  id: number
+  valor: number
+  numeroParcelas: number
+  aceiteExpiraEm: string | null
+}
+
 interface HomeData {
   contratosAtivos: number
+  contratosPendentesAceite: ContratoPendenteAceite[]
   proximaParcela: { valor: number; dataVencimento: string; installmentId: number } | null
   totalEmAberto: number
   ultimosPagamentos: Pagamento[]
@@ -45,7 +53,7 @@ const METODOS: Record<string, string> = {
 export default function PortalHomePage() {
   const { data, isLoading } = useQuery<HomeData>({
     queryKey: ['portal-home'],
-    queryFn: () => api.get('/portal/home').then(r => r.data),
+    queryFn: () => portalClient.get('/portal/home').then(r => r.data),
   })
 
   if (isLoading) {
@@ -65,6 +73,27 @@ export default function PortalHomePage() {
 
   return (
     <div className="space-y-5">
+      {/* Contratos aguardando aceite — ação urgente */}
+      {d?.contratosPendentesAceite?.map(c => (
+        <div key={c.id} className="rounded-xl border-2 border-orange-300 bg-orange-50 px-4 py-4 space-y-3">
+          <div className="flex items-center gap-2 font-semibold text-orange-900 text-sm">
+            <FileSignature className="size-4 shrink-0" />
+            Proposta aguardando sua assinatura
+          </div>
+          <div className="text-sm text-orange-800 space-y-0.5">
+            <p>Valor: <span className="font-medium">{formatCurrency(c.valor)}</span> · {c.numeroParcelas} parcelas</p>
+            {c.aceiteExpiraEm && (
+              <p className="text-xs">Prazo para aceite: {formatDate(c.aceiteExpiraEm)}</p>
+            )}
+          </div>
+          <Link href={`/portal/contratos/${c.id}`}>
+            <Button className="w-full bg-orange-600 hover:bg-orange-700 text-white h-9 text-sm">
+              Ver proposta e assinar
+            </Button>
+          </Link>
+        </div>
+      ))}
+
       {/* Alerta */}
       {d?.alerta && (
         <div className={`rounded-xl border px-4 py-3 flex items-start gap-3 text-sm ${

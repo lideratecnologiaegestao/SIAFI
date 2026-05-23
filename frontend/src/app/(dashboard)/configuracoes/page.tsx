@@ -16,44 +16,73 @@ type SettingsMap = Record<string, string>
 const SETTING_GROUPS = [
   {
     title: 'Informações do Sistema',
+    icon: '🏢',
     keys: [
-      { key: 'app_name', label: 'Nome do Sistema', placeholder: 'SIAFI' },
-      { key: 'app_url', label: 'URL do Sistema', placeholder: 'https://financeiro.lidera.app.br' },
-      { key: 'empresa_nome', label: 'Nome da Empresa', placeholder: 'Lidera' },
-      { key: 'empresa_email', label: 'E-mail de Contato', placeholder: 'contato@empresa.com' },
+      { key: 'app_name',      label: 'Nome do Sistema',    placeholder: 'SIAFI' },
+      { key: 'app_url',       label: 'URL do Sistema',     placeholder: 'https://financeiro.lidera.app.br' },
+      { key: 'empresa_nome',  label: 'Nome da Empresa',    placeholder: 'Lidera' },
+      { key: 'empresa_email', label: 'E-mail de Contato',  placeholder: 'contato@empresa.com' },
+    ],
+  },
+  {
+    title: 'Encargos Financeiros',
+    icon: '💰',
+    description: 'Taxas aplicadas automaticamente sobre inadimplência.',
+    keys: [
+      { key: 'taxa_mora_diaria',    label: 'Mora diária (%)',      placeholder: '0.033', hint: 'Juros ao dia sobre saldo em atraso. Ex: 0.033 = 1% ao mês' },
+      { key: 'taxa_multa',          label: 'Multa por atraso (%)', placeholder: '2',     hint: 'Aplicada na primeira ocorrência de atraso' },
+      { key: 'dias_tolerancia',     label: 'Dias de tolerância',   placeholder: '0',     hint: 'Dias após vencimento antes de aplicar encargos' },
+      { key: 'taxa_juros_padrao',   label: 'Taxa de juros padrão (%)', placeholder: '5', hint: 'Taxa pré-preenchida ao criar empréstimo' },
+    ],
+  },
+  {
+    title: 'SLAs e Prazos',
+    icon: '⏱',
+    description: 'Prazos operacionais para análise e aceite de contratos.',
+    keys: [
+      { key: 'intencao.prazo_analise_horas',   label: 'Prazo de análise de intenções (h)', placeholder: '24', hint: 'Horas para financeiro analisar uma intenção antes do SLA expirar' },
+      { key: 'financeiro.sla_aceite_dias',     label: 'Prazo de aceite do cliente (dias)', placeholder: '3',  hint: 'Dias para o cliente assinar digitalmente no portal' },
+      { key: 'financeiro.sla_reparcelamento',  label: 'Prazo de análise de reparcelamento (dias)', placeholder: '2', hint: 'Dias para financeiro responder uma proposta de reparcelamento' },
+      { key: 'intencao.auto_aprovacao',        label: 'Auto-aprovação de intenções',       placeholder: 'false', hint: 'true = aprovar automaticamente ao expirar SLA' },
+    ],
+  },
+  {
+    title: 'Limites Operacionais',
+    icon: '🔒',
+    description: 'Valores mínimos e máximos para controle de empréstimos.',
+    keys: [
+      { key: 'emprestimo.valor_minimo', label: 'Valor mínimo (R$)',    placeholder: '100' },
+      { key: 'emprestimo.valor_maximo', label: 'Valor máximo (R$)',    placeholder: '50000' },
+      { key: 'emprestimo.parcelas_min', label: 'Parcelas mínimas',     placeholder: '1' },
+      { key: 'emprestimo.parcelas_max', label: 'Parcelas máximas',     placeholder: '60' },
     ],
   },
   {
     title: 'WhatsApp (Evolution API)',
+    icon: '💬',
     keys: [
-      { key: 'whatsapp_api_url', label: 'URL da API', placeholder: 'https://evolution.api.com' },
-      { key: 'whatsapp_api_key', label: 'API Key', placeholder: 'sua-api-key' },
-      { key: 'whatsapp_instance', label: 'Instância', placeholder: 'nome-instancia' },
+      { key: 'whatsapp_api_url',      label: 'URL da API',   placeholder: 'https://evolution.api.com' },
+      { key: 'whatsapp_api_key',      label: 'API Key',      placeholder: 'sua-api-key' },
+      { key: 'whatsapp_instance',     label: 'Instância',    placeholder: 'nome-instancia' },
     ],
   },
   {
     title: 'Mercado Pago',
+    icon: '💳',
     keys: [
-      { key: 'mp_access_token', label: 'Access Token', placeholder: 'APP_USR-...' },
-      { key: 'mp_webhook_secret', label: 'Webhook Secret', placeholder: 'secret' },
+      { key: 'mp_access_token',   label: 'Access Token',    placeholder: 'APP_USR-...' },
+      { key: 'mp_webhook_secret', label: 'Webhook Secret',  placeholder: 'secret' },
     ],
   },
   {
     title: 'E-mail (SMTP)',
+    icon: '📧',
     keys: [
-      { key: 'mail_host', label: 'Servidor SMTP', placeholder: 'smtp.gmail.com' },
-      { key: 'mail_port', label: 'Porta', placeholder: '587' },
-      { key: 'mail_user', label: 'Usuário', placeholder: 'email@gmail.com' },
-      { key: 'mail_pass', label: 'Senha', placeholder: '••••••••' },
-      { key: 'mail_from_name', label: 'Nome do Remetente', placeholder: 'SIAFI' },
-    ],
-  },
-  {
-    title: 'Configurações de Empréstimo',
-    keys: [
-      { key: 'taxa_juros_padrao', label: 'Taxa de Juros Padrão (%)', placeholder: '5' },
-      { key: 'modo_taxa_padrao', label: 'Modalidade Padrão', placeholder: 'mensal' },
-      { key: 'dias_tolerancia', label: 'Dias de Tolerância para Atraso', placeholder: '0' },
+      { key: 'mail_host',       label: 'Servidor SMTP',      placeholder: 'smtp.hostinger.com' },
+      { key: 'mail_port',       label: 'Porta',              placeholder: '465' },
+      { key: 'mail_user',       label: 'Usuário',            placeholder: 'nao-responder@siafi.lidera.srv.br' },
+      { key: 'mail_pass',       label: 'Senha',              placeholder: '••••••••' },
+      { key: 'mail_from_name',  label: 'Nome do Remetente',  placeholder: 'SIAFI — Lidera' },
     ],
   },
 ]
@@ -114,11 +143,19 @@ export default function ConfiguracoesPage() {
       )}
 
       {isLoading ? (
-        <div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}</div>
+        <div className="space-y-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}</div>
       ) : (
         SETTING_GROUPS.map((group) => (
           <Card key={group.title}>
-            <CardHeader><CardTitle className="text-base">{group.title}</CardTitle></CardHeader>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <span>{(group as any).icon}</span>
+                {group.title}
+              </CardTitle>
+              {(group as any).description && (
+                <p className="text-xs text-muted-foreground mt-0.5">{(group as any).description}</p>
+              )}
+            </CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {group.keys.map((item) => (
                 <div key={item.key} className="space-y-1.5">
@@ -130,6 +167,9 @@ export default function ConfiguracoesPage() {
                     value={values[item.key] ?? ''}
                     onChange={(e) => handleChange(item.key, e.target.value)}
                   />
+                  {'hint' in item && item.hint && (
+                    <p className="text-xs text-muted-foreground">{item.hint}</p>
+                  )}
                 </div>
               ))}
             </CardContent>

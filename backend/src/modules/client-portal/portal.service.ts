@@ -13,7 +13,11 @@ import { SupabaseService } from '../../supabase/supabase.service';
 import {
   QUEUE_FINANCE_NOTIFICATIONS,
   JOB_WA_PORTAL_ATIVADO,
-  JOB_EMAIL_PORTAL_ATIVADO,
+  JOB_EMAIL_LINK_ACESSO,
+  JOB_EMAIL_ACEITE_CONTRATO,
+  JOB_WA_ACEITE_CONTRATO,
+  JOB_EMAIL_CAPITAL_LIBERADO,
+  JOB_WA_CAPITAL_LIBERADO,
 } from '../queue/queue.constants';
 import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 
@@ -28,7 +32,11 @@ export class PortalService {
 
   // ─── Ativar portal ────────────────────────────────────────────────────────
 
-  async ativarPortal(clientId: number, operador: RequestUser) {
+  async ativarPortal(
+    clientId: number,
+    operador: RequestUser,
+    options: { skipNotificacoes?: boolean } = {},
+  ) {
     const client = await this.prisma.client.findFirst({
       where: { id: clientId, active: true },
     });
@@ -44,17 +52,21 @@ export class PortalService {
       );
     }
 
-    // Idempotência — já está ativo?
+    // Idempotência — já está ativo? Apenas reenvia o link.
     if (client.portalAtivo && client.supabaseId) {
-      return { sucesso: true, mensagem: 'Portal já estava ativo.', jaAtivo: true };
+      if (!options.skipNotificacoes) {
+        const link = await this.gerarLinkAcesso(client.email);
+        await this.enfileirarNotificacoes(client.id, client.nome, client.whatsapp, client.email, link, true);
+      }
+      return { sucesso: true, mensagem: `Link de acesso reenviado para ${client.email}.`, jaAtivo: true };
     }
 
-    const senhaTemporaria = this.gerarSenhaTemporaria();
+    const senhaInterna = this.gerarSenhaTemporaria();
 
-    // Se já tem supabaseId (portal foi desativado) → reativar + nova senha
+    // Se já tem supabaseId (portal foi desativado) → desbanir + gerar link
     if (client.supabaseId) {
       await this.supabase.admin.auth.admin.updateUserById(client.supabaseId, {
-        password: senhaTemporaria,
+        password: senhaInterna,
         ban_duration: 'none',
         app_metadata: { role: 'cliente', clientId: client.id },
       });
@@ -65,25 +77,24 @@ export class PortalService {
           portalAtivo: true,
           portalAtivadoEm: new Date(),
           portalAtivadoPor: operador.id,
-          senhaTemporaria: true,
+          senhaTemporaria: false,
           primeiroAcesso: true,
         },
       });
 
       await this.registrarAudit(operador.id, 'PORTAL_REATIVADO', clientId, { email: client.email });
-      await this.enfileirarNotificacoes(client.id, client.nome, client.whatsapp, client.email, senhaTemporaria);
 
-      return {
-        sucesso: true,
-        senhaTemporaria,
-        mensagem: `Portal reativado. Senha enviada para ${client.email}.`,
-      };
+      if (!options.skipNotificacoes) {
+        const link = await this.gerarLinkAcesso(client.email);
+        await this.enfileirarNotificacoes(client.id, client.nome, client.whatsapp, client.email, link, true);
+      }
+
+      return { sucesso: true, mensagem: `Portal reativado. Link enviado para ${client.email}.` };
     }
 
     // Novo usuário no Supabase Auth
     let supabaseUserId: string | null = null;
     try {
-      // Verificar se email já existe no Supabase
       const { data: existingList } = await this.supabase.admin.auth.admin.listUsers();
       const users = (existingList as { users?: { id: string; email?: string }[] } | null)?.users ?? [];
       const existing = users.find(u => u.email === client.email);
@@ -91,7 +102,7 @@ export class PortalService {
       if (existing) {
         supabaseUserId = existing.id;
         await this.supabase.admin.auth.admin.updateUserById(supabaseUserId, {
-          password: senhaTemporaria,
+          password: senhaInterna,
           ban_duration: 'none',
           app_metadata: { role: 'cliente', clientId: client.id },
           email_confirm: true,
@@ -99,7 +110,7 @@ export class PortalService {
       } else {
         const { data, error } = await this.supabase.admin.auth.admin.createUser({
           email: client.email,
-          password: senhaTemporaria,
+          password: senhaInterna,
           email_confirm: true,
           app_metadata: { role: 'cliente', clientId: client.id },
           user_metadata: { nome: client.nome },
@@ -117,7 +128,7 @@ export class PortalService {
           portalAtivo: true,
           portalAtivadoEm: new Date(),
           portalAtivadoPor: operador.id,
-          senhaTemporaria: true,
+          senhaTemporaria: false,
           primeiroAcesso: true,
         },
       });
@@ -132,13 +143,97 @@ export class PortalService {
       email: client.email,
       ativadoPor: operador.nome,
     });
-    await this.enfileirarNotificacoes(client.id, client.nome, client.whatsapp, client.email, senhaTemporaria);
 
-    return {
-      sucesso: true,
-      senhaTemporaria,
-      mensagem: `Portal ativado. Senha enviada via WhatsApp e email para ${client.email}.`,
+    if (!options.skipNotificacoes) {
+      const link = await this.gerarLinkAcesso(client.email);
+      await this.enfileirarNotificacoes(client.id, client.nome, client.whatsapp, client.email, link, true);
+    }
+
+    return { sucesso: true, mensagem: `Portal ativado. Link enviado para ${client.email}.` };
+  }
+
+  // ─── Notificar aceite de contrato ─────────────────────────────────────────
+  // Ativa o portal silenciosamente e envia email/WhatsApp específicos para
+  // assinatura do contrato, distinguindo primeiro acesso vs. cliente já ativo.
+
+  async notificarAceiteContrato(clientId: number, operador: RequestUser, loanId: number): Promise<unknown> {
+    // Lê estado ANTES da ativação: se já tinha conta ativa, cliente já sabe acessar o portal
+    const clientAntes = await this.prisma.client.findFirst({
+      where: { id: clientId },
+      select: { portalAtivo: true, supabaseId: true },
+    });
+    const jaEraAtivo = !!(clientAntes?.portalAtivo && clientAntes.supabaseId);
+
+    // Garante que a conta Supabase existe e o portal está ativo (sem enviar email genérico)
+    const result = await this.ativarPortal(clientId, operador, { skipNotificacoes: true });
+
+    const client = await this.prisma.client.findFirst({
+      where: { id: clientId },
+      select: { id: true, nome: true, email: true, whatsapp: true, supabaseId: true },
+    });
+
+    if (!client?.email) return result;
+
+    // Portal já estava ativo → link para o login; cliente vai em Contratos após autenticar
+    // Acabou de ser ativado → recovery link para definir senha antes de acessar o portal
+    const needsPasswordSetup = !jaEraAtivo;
+    const baseUrl = process.env.APP_URL ?? 'https://financeiro.lidera.app.br';
+    let link: string;
+    if (jaEraAtivo) {
+      link = `${baseUrl}/portal/login`;
+    } else {
+      link = await this.gerarLinkAcesso(client.email);
+    }
+
+    const loan = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      select: { principalAmount: true, numeroParcelas: true },
+    });
+
+    const payload = {
+      clientId,
+      clienteNome: client.nome,
+      clienteEmail: client.email,
+      clienteWhatsapp: client.whatsapp ?? undefined,
+      loanId,
+      linkAcesso: link,
+      needsPasswordSetup: needsPasswordSetup,
+      principalAmount: loan ? Number(loan.principalAmount) : undefined,
+      numeroParcelas: loan?.numeroParcelas ?? undefined,
     };
+
+    if (client.whatsapp) {
+      await this.notificationsQueue.add(JOB_WA_ACEITE_CONTRATO, payload).catch(() => {});
+    }
+    await this.notificationsQueue.add(JOB_EMAIL_ACEITE_CONTRATO, payload).catch(() => {});
+
+    return result;
+  }
+
+  // ─── Notificar liberação de capital ──────────────────────────────────────
+
+  async notificarCapitalLiberado(loanId: number): Promise<void> {
+    const loan = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: { client: { select: { id: true, nome: true, email: true, whatsapp: true } } },
+    });
+    if (!loan?.client) return;
+
+    const payload = {
+      clientId:        loan.client.id,
+      clienteNome:     loan.client.nome,
+      clienteEmail:    loan.client.email ?? undefined,
+      clienteWhatsapp: loan.client.whatsapp ?? undefined,
+      loanId,
+      principalAmount: Number(loan.principalAmount),
+    };
+
+    if (loan.client.whatsapp) {
+      await this.notificationsQueue.add(JOB_WA_CAPITAL_LIBERADO, payload).catch(() => {});
+    }
+    if (loan.client.email) {
+      await this.notificationsQueue.add(JOB_EMAIL_CAPITAL_LIBERADO, payload).catch(() => {});
+    }
   }
 
   // ─── Desativar portal ─────────────────────────────────────────────────────
@@ -191,38 +286,33 @@ export class PortalService {
     return { sucesso: true, mensagem: 'Portal reativado com sucesso.' };
   }
 
-  // ─── Reenviar senha ───────────────────────────────────────────────────────
+  // ─── Enviar link de redefinição de senha ─────────────────────────────────
 
   async reenviarSenha(clientId: number, operador: RequestUser) {
     const client = await this.prisma.client.findFirst({
       where: { id: clientId, portalAtivo: true, active: true },
     });
-    if (!client) throw new NotFoundException('Portal não está ativo.');
+    if (!client) throw new NotFoundException('Portal não está ativo para este cliente.');
 
     if (operador.role === 'consultor' && client.consultorId !== operador.id) {
       throw new ForbiddenException('Cliente não pertence à sua carteira.');
+    }
+
+    if (!client.email) {
+      throw new BadRequestException('Cliente não possui email cadastrado.');
     }
 
     if (!client.supabaseId) {
       throw new BadRequestException('Cliente não possui conta Supabase vinculada.');
     }
 
-    const novaSenha = this.gerarSenhaTemporaria();
+    const link = await this.gerarLinkAcesso(client.email);
 
-    await this.supabase.admin.auth.admin.updateUserById(client.supabaseId, {
-      password: novaSenha,
-    });
+    await this.enfileirarNotificacoes(client.id, client.nome, client.whatsapp, client.email, link, false);
 
-    await this.prisma.client.update({
-      where: { id: clientId },
-      data: { senhaTemporaria: true, primeiroAcesso: true },
-    });
+    await this.registrarAudit(operador.id, 'PORTAL_LINK_ENVIADO', clientId, {});
 
-    await this.enfileirarNotificacoes(client.id, client.nome, client.whatsapp, client.email, novaSenha, true);
-
-    await this.registrarAudit(operador.id, 'PORTAL_SENHA_REENVIADA', clientId, {});
-
-    return { sucesso: true, mensagem: 'Nova senha enviada ao cliente.' };
+    return { sucesso: true, mensagem: `Link de redefinição de senha enviado para ${client.email}.` };
   }
 
   // ─── Status do portal ─────────────────────────────────────────────────────
@@ -281,7 +371,6 @@ export class PortalService {
     for (let i = 4; i < 12; i++) {
       senha += all[bytes[i] % all.length];
     }
-    // Fisher-Yates com crypto
     const arr = senha.split('');
     for (let i = arr.length - 1; i > 0; i--) {
       const j = crypto.randomInt(i + 1);
@@ -307,16 +396,39 @@ export class PortalService {
     }).catch(() => {});
   }
 
+  private async gerarLinkAcesso(email: string): Promise<string> {
+    const redirectTo = `${process.env.APP_URL ?? 'https://financeiro.lidera.app.br'}/redefinir-senha`;
+    const { data, error } = await this.supabase.admin.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+      options: { redirectTo },
+    });
+    if (error || !data?.properties?.action_link) {
+      throw new InternalServerErrorException(
+        `Erro ao gerar link de acesso: ${error?.message ?? 'resposta vazia'}`,
+      );
+    }
+    return data.properties.action_link as string;
+  }
+
   private async enfileirarNotificacoes(
     clientId: number,
     nome: string,
     whatsapp: string | null,
     email: string | null,
-    senhaTemporaria: string,
-    isReenvio = false,
+    link: string,
+    isAtivacao: boolean,
   ) {
-    const payload = { clientId, clienteNome: nome, clienteWhatsapp: whatsapp, clienteEmail: email, senhaTemporaria, isReenvio };
-    await this.notificationsQueue.add(JOB_WA_PORTAL_ATIVADO, payload).catch(() => {});
-    await this.notificationsQueue.add(JOB_EMAIL_PORTAL_ATIVADO, payload).catch(() => {});
+    const basePayload = { clientId, clienteNome: nome, clienteWhatsapp: whatsapp ?? undefined, clienteEmail: email ?? undefined };
+    if (whatsapp) {
+      await this.notificationsQueue.add(JOB_WA_PORTAL_ATIVADO, basePayload).catch(() => {});
+    }
+    if (email) {
+      await this.notificationsQueue.add(JOB_EMAIL_LINK_ACESSO, {
+        ...basePayload,
+        linkAcesso: link,
+        isAtivacao,
+      }).catch(() => {});
+    }
   }
 }

@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { LoanStatus, Prisma } from '@prisma/client';
@@ -10,10 +9,12 @@ import { createHash } from 'crypto';
 import Decimal from 'decimal.js';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { PortalService } from '../client-portal/portal.service';
 import { PaginatedResponse, paginate } from '../../common/dto/paginated-response.dto';
 import { addMonthsSafe, calcularDataVencimento } from '../../common/utils/date.utils';
 import { CreateLoanDto } from './dto/create-loan.dto';
 import { LoanFilterDto } from './dto/loan-filter.dto';
+import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 
 // Precisão financeira global — 20 dígitos significativos, arredondamento "meio acima"
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -28,11 +29,14 @@ interface RequestContext {
 
 @Injectable()
 export class LoansService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly portalService: PortalService,
+  ) {}
 
   // ─── Queries ────────────────────────────────────────────────────────────────
 
-  async findAll(filters: LoanFilterDto): Promise<PaginatedResponse<unknown>> {
+  async findAll(filters: LoanFilterDto, role?: string): Promise<PaginatedResponse<unknown>> {
     const { page, limit, search, status, clientId } = filters;
     const skip = (page - 1) * limit;
 
@@ -54,10 +58,14 @@ export class LoansService {
       this.prisma.loan.count({ where }),
     ]);
 
-    return paginate(data, total, page, limit);
+    const items = role === 'caixa'
+      ? data.map((l) => this.sanitizeForCaixa(l as Record<string, unknown>))
+      : data;
+
+    return paginate(items, total, page, limit);
   }
 
-  async findById(id: number): Promise<unknown> {
+  async findById(id: number, role?: string): Promise<unknown> {
     const loan = await this.prisma.loan.findUnique({
       where: { id },
       include: {
@@ -77,7 +85,9 @@ export class LoansService {
     });
 
     if (!loan) throw new NotFoundException(`Empréstimo ${id} não encontrado`);
-    return loan;
+    return role === 'caixa'
+      ? this.sanitizeForCaixa(loan as Record<string, unknown>)
+      : loan;
   }
 
   async getStats(): Promise<Record<string, unknown>> {
@@ -129,35 +139,23 @@ export class LoansService {
     if (profit.lt(0))     throw new BadRequestException('targetProfit não pode ser negativo.');
 
     // ── Cálculo base de cada parcela (floor para evitar exceder o total) ────
+    // basePrincipal e baseInstallment usam ROUND_DOWN independentemente;
+    // baseGain é derivado de baseInstallment - basePrincipal para garantir que
+    // installmentAmount == principalPayback + netGain em todas as parcelas.
     const baseInstallment = total.dividedBy(n).toDecimalPlaces(2, Decimal.ROUND_DOWN);
     const basePrincipal   = principal.dividedBy(n).toDecimalPlaces(2, Decimal.ROUND_DOWN);
-    const baseGain        = profit.dividedBy(n).toDecimalPlaces(2, Decimal.ROUND_DOWN);
 
     // ── Ajustes de centavos para a última parcela ───────────────────────────
     const ajusteInstallment = total.minus(baseInstallment.times(n));
     const ajustePrincipal   = principal.minus(basePrincipal.times(n));
-    const ajusteGain        = profit.minus(baseGain.times(n));
-
-    // Verificação de integridade: ajusteInstallment = ajustePrincipal + ajusteGain
-    if (!ajustePrincipal.plus(ajusteGain).equals(ajusteInstallment)) {
-      throw new InternalServerErrorException(
-        'Erro de integridade no cálculo de split: ajuste de centavos inconsistente.',
-      );
-    }
 
     // ── Geração das parcelas ────────────────────────────────────────────────
     const installments = Array.from({ length: n }, (_, i) => {
-      const isUltima       = i === n - 1;
-      const installAmt     = isUltima ? baseInstallment.plus(ajusteInstallment) : baseInstallment;
-      const principalPay   = isUltima ? basePrincipal.plus(ajustePrincipal)     : basePrincipal;
-      const gain           = isUltima ? baseGain.plus(ajusteGain)               : baseGain;
-
-      if (!installAmt.equals(principalPay.plus(gain))) {
-        throw new InternalServerErrorException(
-          `Invariante violada na parcela ${i + 1}: ` +
-          `${installAmt} !== ${principalPay} + ${gain}`,
-        );
-      }
+      const isUltima     = i === n - 1;
+      const installAmt   = isUltima ? baseInstallment.plus(ajusteInstallment) : baseInstallment;
+      const principalPay = isUltima ? basePrincipal.plus(ajustePrincipal)     : basePrincipal;
+      // gain derivado para garantir a invariante: installAmt == principalPay + gain
+      const gain         = installAmt.minus(principalPay);
 
       const amt = installAmt.toDecimalPlaces(2).toNumber();
       return {
@@ -217,7 +215,6 @@ export class LoansService {
           numeroParcelas:   n,
           baseInstallment:  baseInstallment.toString(),
           basePrincipal:    basePrincipal.toString(),
-          baseGain:         baseGain.toString(),
           ajusteInstallment: ajusteInstallment.toString(),
           primeiraParcela:  installments[0]?.dataVencimento,
           ultimaParcela:    installments[installments.length - 1]?.dataVencimento,
@@ -260,13 +257,35 @@ export class LoansService {
     return this.findById(id);
   }
 
+  // ─── Reenviar link de aceite ─────────────────────────────────────────────────
+
+  async reenviarAceite(id: number, user: RequestUser): Promise<unknown> {
+    const loan = await this.prisma.loan.findUnique({
+      where: { id },
+      select: { id: true, status: true, clientId: true },
+    });
+    if (!loan) throw new NotFoundException(`Empréstimo ${id} não encontrado`);
+    if (loan.status !== 'aguardando_aceite') {
+      throw new BadRequestException('Link de aceite só pode ser reenviado quando o contrato está aguardando aceite do cliente.');
+    }
+
+    return this.portalService.notificarAceiteContrato(loan.clientId, user, id);
+  }
+
   // ─── Liberações pendentes ────────────────────────────────────────────────────
 
   async findPendentesLiberacao(): Promise<unknown[]> {
     return this.prisma.loan.findMany({
       where: { status: 'aguardando_liberacao' },
-      include: {
-        client: { select: { id: true, nome: true, nomeSocial: true } },
+      select: {
+        id: true,
+        principalAmount: true,
+        numeroParcelas: true,
+        aceiteClienteEm: true,
+        aceiteClienteIp: true,
+        createdAt: true,
+        client: { select: { id: true, nome: true, nomeSocial: true, whatsapp: true } },
+        consultor: { select: { nome: true } },
       },
       orderBy: { aceiteClienteEm: 'asc' },
     });
@@ -346,6 +365,9 @@ export class LoansService {
         },
       });
     });
+
+    // Notificar cliente sobre liberação do capital (fire-and-forget)
+    this.portalService.notificarCapitalLiberado(loanId).catch(() => {});
 
     return this.findById(loanId);
   }
@@ -427,6 +449,20 @@ export class LoansService {
         userAgent: userAgent ?? null,
       },
     });
+  }
+
+  // Remove financial split fields (targetProfit, principalAmount, principalPayback, netGain)
+  // from loans and installments returned to users with role 'caixa'.
+  private sanitizeForCaixa(loan: Record<string, unknown>): Record<string, unknown> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { targetProfit, principalAmount, ...loanRest } = loan as Record<string, unknown>;
+    if (Array.isArray(loanRest['installments'])) {
+      loanRest['installments'] = (loanRest['installments'] as Record<string, unknown>[]).map(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        ({ principalPayback, netGain, ...instRest }) => instRest,
+      );
+    }
+    return loanRest;
   }
 
   private serializeLoan(loan: Record<string, unknown>): Record<string, unknown> {

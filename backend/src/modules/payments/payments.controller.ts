@@ -33,6 +33,13 @@ export class PaymentsController {
     return this.paymentsService.findAll(search);
   }
 
+  // Pagamentos registrados hoje — dashboard do caixa
+  @Get('hoje')
+  @Roles('admin', 'financeiro', 'caixa')
+  findHoje() {
+    return this.paymentsService.findHoje();
+  }
+
   @Post()
   @Roles('admin', 'financeiro', 'caixa')
   create(@Body() dto: CreatePaymentDto, @CurrentUser() user: AuthUser) {

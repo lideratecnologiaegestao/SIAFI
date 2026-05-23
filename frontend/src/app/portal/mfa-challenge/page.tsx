@@ -4,46 +4,60 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { Loader2, ShieldCheck } from 'lucide-react'
-import { useAuth } from '@/contexts/auth.context'
-import { mfaChallengeAndVerify, mfaListFactors, type MfaFactor } from '@/lib/supabase/mfa'
+import { getSupabaseBrowserClient } from '@/lib/supabase/client'
+import { portalTokenStore } from '@/lib/portal/portal-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import Link from 'next/link'
 
+function getRedirectParam() {
+  if (typeof window === 'undefined') return '/portal'
+  const r = new URLSearchParams(window.location.search).get('redirect')
+  return r?.startsWith('/') ? r : '/portal'
+}
+
 export default function PortalMfaChallengePage() {
-  const { isAuthenticated, isLoading, completeMfa, user } = useAuth()
   const router = useRouter()
+  const [factorId, setFactorId] = useState<string | null>(null)
   const [code, setCode] = useState('')
-  const [factor, setFactor] = useState<MfaFactor | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) router.replace('/login')
-    if (!isLoading && user && user.role !== 'cliente') router.replace('/mfa-challenge')
-  }, [isAuthenticated, isLoading, user, router])
-
-  useEffect(() => {
-    mfaListFactors()
-      .then(factors => {
-        const verified = factors.find(f => f.status === 'verified' && f.factor_type === 'totp')
-        if (!verified) { router.replace('/portal/mfa-setup'); return }
-        setFactor(verified)
+    const supabase = getSupabaseBrowserClient()
+    supabase.auth.mfa.listFactors()
+      .then(({ data, error: listError }: any) => {
+        if (listError) throw listError
+        const verified = data?.all?.find((f: any) => f.status === 'verified' && f.factor_type === 'totp')
+        if (!verified) {
+          router.replace('/portal/mfa-setup?redirect=' + encodeURIComponent(getRedirectParam()))
+          return
+        }
+        setFactorId(verified.id)
         setLoading(false)
       })
-      .catch(() => { setError('Erro ao carregar. Faça login novamente.'); setLoading(false) })
+      .catch(() => {
+        setError('Erro ao carregar. Faça login novamente.')
+        setLoading(false)
+      })
   }, [router])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!factor || code.length !== 6) return
+    if (!factorId || code.length !== 6) return
     setError(null)
     setSubmitting(true)
     try {
-      const { access_token } = await mfaChallengeAndVerify(factor.id, code)
-      await completeMfa(access_token)
-      router.replace('/portal')
+      const supabase = getSupabaseBrowserClient()
+      const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify({ factorId, code })
+      if (verifyError) throw verifyError
+
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) {
+        portalTokenStore.set(session.access_token)
+      }
+      router.replace(getRedirectParam())
     } catch (e: any) {
       setError(e?.message ?? 'Código inválido. Tente novamente.')
       setCode('')
@@ -52,7 +66,7 @@ export default function PortalMfaChallengePage() {
     }
   }
 
-  if (isLoading || loading) return (
+  if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
       <Loader2 className="size-8 animate-spin text-blue-600" />
     </div>
@@ -100,10 +114,7 @@ export default function PortalMfaChallengePage() {
               {submitting ? <><Loader2 className="size-4 animate-spin mr-2" />Verificando...</> : 'Verificar →'}
             </Button>
           </form>
-
-          <p className="text-center text-xs text-muted-foreground">
-            O código se renova a cada 30 segundos.
-          </p>
+          <p className="text-center text-xs text-muted-foreground">O código se renova a cada 30 segundos.</p>
         </div>
 
         <div className="text-center">

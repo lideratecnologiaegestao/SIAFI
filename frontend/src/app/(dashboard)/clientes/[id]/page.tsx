@@ -104,9 +104,11 @@ export default function ClienteDetalhePage() {
         </div>
         <div className="flex gap-2">
           <Badge variant={client.active ? 'success' : 'outline'}>{client.active ? 'Ativo' : 'Inativo'}</Badge>
-          <Link href={`/clientes/${client.id}/editar`}>
-            <Button size="sm" className="gap-2"><Pencil className="size-3.5" />Editar</Button>
-          </Link>
+          {canManage && (
+            <Link href={`/clientes/${client.id}/editar`}>
+              <Button size="sm" className="gap-2"><Pencil className="size-3.5" />Editar</Button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -265,9 +267,11 @@ export default function ClienteDetalhePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2"><CreditCard className="size-4" />Empréstimos de {client.nome}</CardTitle>
-            <Link href={`/emprestimos/novo?clienteId=${client.id}`}>
-              <Button size="sm" variant="outline">Novo empréstimo</Button>
-            </Link>
+            {canManage && (
+              <Link href={`/emprestimos/novo?clienteId=${client.id}`}>
+                <Button size="sm" variant="outline">Novo empréstimo</Button>
+              </Link>
+            )}
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">

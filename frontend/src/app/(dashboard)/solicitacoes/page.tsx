@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ClipboardList, Plus, CheckCircle, XCircle, Clock, X } from 'lucide-react'
+import { ClipboardList, Plus, CheckCircle, XCircle, Clock, X, AlertTriangle } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuth } from '@/contexts/auth.context'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,7 +13,7 @@ import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
@@ -22,11 +22,13 @@ interface Solicitacao {
   tipo: string
   descricao: string
   status: string
+  urgencia: string
   valorSolicitado: number | null
   respostaFinanceiro: string | null
   createdAt: string
   consultor: { nome: string }
   client: { nome: string; cpf: string | null }
+  loan: { id: number; status: string } | null
 }
 
 interface ClienteCarteira {
@@ -34,10 +36,19 @@ interface ClienteCarteira {
   nome: string
 }
 
+interface LoanResumo {
+  id: number
+  status: string
+  principalAmount: number
+  numeroParcelas: number
+}
+
 const criarSchema = z.object({
   clientId: z.coerce.number().int().positive('Selecione um cliente'),
+  loanId: z.coerce.number().int().positive().optional().or(z.literal('')),
   tipo: z.enum(['desconto', 'reparcelamento', 'intencao_emprestimo', 'outro']),
-  descricao: z.string().min(5, 'Descreva a solicitação'),
+  urgencia: z.enum(['normal', 'alta']).default('normal'),
+  descricao: z.string().min(5, 'Descreva a solicitação com pelo menos 5 caracteres'),
   valorSolicitado: z.string().optional(),
 })
 
@@ -50,16 +61,16 @@ type CriarForm = z.infer<typeof criarSchema>
 type ResponderForm = z.infer<typeof responderSchema>
 
 const statusBadge = {
-  pendente: { label: 'Pendente', variant: 'secondary' as const, Icon: Clock },
-  aprovado: { label: 'Aprovado', variant: 'default' as const, Icon: CheckCircle },
+  pendente:  { label: 'Pendente',  variant: 'secondary' as const, Icon: Clock },
+  aprovado:  { label: 'Aprovado',  variant: 'default' as const,   Icon: CheckCircle },
   rejeitado: { label: 'Rejeitado', variant: 'destructive' as const, Icon: XCircle },
 }
 
 const tipoLabel: Record<string, string> = {
-  desconto: 'Desconto',
-  reparcelamento: 'Reparcelamento',
-  intencao_emprestimo: 'Intenção de Empréstimo',
-  outro: 'Outro',
+  desconto:           'Desconto',
+  reparcelamento:     'Reparcelamento',
+  intencao_emprestimo:'Intenção de Empréstimo',
+  outro:              'Outro',
 }
 
 function formatCurrency(v: number) {
@@ -73,8 +84,8 @@ function formatDate(s: string) {
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-background rounded-xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-5 py-4 border-b">
+      <div className="bg-background rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b sticky top-0 bg-background">
           <h2 className="font-semibold">{title}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="size-4" />
@@ -111,7 +122,7 @@ export default function SolicitacoesPage() {
 
   const criarForm = useForm<CriarForm>({
     resolver: zodResolver(criarSchema) as any,
-    defaultValues: { tipo: 'outro', descricao: '' },
+    defaultValues: { tipo: 'outro', urgencia: 'normal', descricao: '' },
   })
 
   const responderForm = useForm<ResponderForm>({
@@ -119,11 +130,24 @@ export default function SolicitacoesPage() {
     defaultValues: { status: 'aprovado' },
   })
 
+  // Watch clientId to load loans dynamically
+  const watchedClientId = useWatch({ control: criarForm.control, name: 'clientId' })
+
+  const { data: clientLoans } = useQuery<LoanResumo[]>({
+    queryKey: ['client-loans-resumo', watchedClientId],
+    queryFn: () =>
+      api.get(`/loans`, { params: { clientId: watchedClientId, status: 'ativo', limit: 20 } })
+        .then(r => Array.isArray(r.data) ? r.data : r.data?.data ?? []),
+    enabled: !!watchedClientId && Number(watchedClientId) > 0,
+  })
+
   const criarMutation = useMutation({
     mutationFn: (dto: CriarForm) =>
       api.post('/solicitacoes', {
         clientId: dto.clientId,
+        loanId: dto.loanId && Number(dto.loanId) > 0 ? Number(dto.loanId) : undefined,
         tipo: dto.tipo,
+        urgencia: dto.urgencia,
         descricao: dto.descricao,
         valorSolicitado: dto.valorSolicitado ? Number(dto.valorSolicitado) : undefined,
       }),
@@ -144,6 +168,8 @@ export default function SolicitacoesPage() {
     },
   })
 
+  const pendentesAlta = data?.filter(s => s.status === 'pendente' && s.urgencia === 'alta') ?? []
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -162,6 +188,16 @@ export default function SolicitacoesPage() {
           </Button>
         )}
       </div>
+
+      {/* Alerta de urgência alta — só para financeiro/admin */}
+      {!isConsultor && pendentesAlta.length > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span>
+            <strong>{pendentesAlta.length}</strong> solicitação{pendentesAlta.length !== 1 ? 'ões' : ''} com urgência alta aguardando resposta.
+          </span>
+        </div>
+      )}
 
       <div className="flex gap-3">
         <Select
@@ -192,7 +228,8 @@ export default function SolicitacoesPage() {
           {data.map(sol => {
             const badge = statusBadge[sol.status as keyof typeof statusBadge] ?? statusBadge.pendente
             return (
-              <Card key={sol.id}>
+              <Card key={sol.id} className={sol.urgencia === 'alta' && sol.status === 'pendente'
+                ? 'border-red-300 dark:border-red-800' : ''}>
                 <CardContent className="pt-4 pb-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -202,11 +239,20 @@ export default function SolicitacoesPage() {
                           {badge.label}
                         </Badge>
                         <Badge variant="outline" className="text-xs">{tipoLabel[sol.tipo] ?? sol.tipo}</Badge>
+                        {sol.urgencia === 'alta' && (
+                          <Badge variant="destructive" className="gap-1 text-xs">
+                            <AlertTriangle className="size-3" />
+                            Alta urgência
+                          </Badge>
+                        )}
                         {sol.valorSolicitado != null && (
                           <span className="text-xs text-muted-foreground">{formatCurrency(sol.valorSolicitado)}</span>
                         )}
                       </div>
                       <p className="text-sm font-medium">{sol.client.nome}</p>
+                      {sol.loan && (
+                        <p className="text-xs text-muted-foreground">Contrato #{sol.loan.id} · {sol.loan.status}</p>
+                      )}
                       <p className="text-sm text-muted-foreground line-clamp-2">{sol.descricao}</p>
                       {sol.respostaFinanceiro && (
                         <p className="text-sm text-slate-600 mt-1 italic">Resp.: {sol.respostaFinanceiro}</p>
@@ -218,7 +264,7 @@ export default function SolicitacoesPage() {
                     {canResponder && sol.status === 'pendente' && (
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant={sol.urgencia === 'alta' ? 'destructive' : 'outline'}
                         onClick={() => {
                           setRespondendo(sol)
                           responderForm.reset({ status: 'aprovado' })
@@ -237,13 +283,14 @@ export default function SolicitacoesPage() {
 
       {/* Modal: Nova Solicitação */}
       {showCriar && (
-        <Modal title="Nova Solicitação" onClose={() => setShowCriar(false)}>
+        <Modal title="Nova Solicitação" onClose={() => { setShowCriar(false); criarForm.reset() }}>
           <form
             onSubmit={criarForm.handleSubmit(dto => criarMutation.mutate(dto))}
             className="space-y-4"
           >
+            {/* Cliente */}
             <div className="space-y-1.5">
-              <Label>Cliente</Label>
+              <Label>Cliente <span className="text-destructive">*</span></Label>
               <Select {...criarForm.register('clientId')}>
                 <option value="">Selecione o cliente</option>
                 {clientes?.map(c => (
@@ -255,33 +302,66 @@ export default function SolicitacoesPage() {
               )}
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Tipo</Label>
-              <Select {...criarForm.register('tipo')}>
-                <option value="desconto">Desconto</option>
-                <option value="reparcelamento">Reparcelamento</option>
-                <option value="intencao_emprestimo">Intenção de Empréstimo</option>
-                <option value="outro">Outro</option>
-              </Select>
+            {/* Contrato relacionado */}
+            {watchedClientId && clientLoans && clientLoans.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Contrato relacionado <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                <Select {...criarForm.register('loanId')}>
+                  <option value="">Nenhum contrato específico</option>
+                  {clientLoans.map(l => (
+                    <option key={l.id} value={l.id}>
+                      Contrato #{l.id} · {formatCurrency(Number(l.principalAmount))} · {l.numeroParcelas}x · {l.status}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {/* Tipo + Urgência — side by side */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Tipo <span className="text-destructive">*</span></Label>
+                <Select {...criarForm.register('tipo')}>
+                  <option value="desconto">Desconto</option>
+                  <option value="reparcelamento">Reparcelamento</option>
+                  <option value="intencao_emprestimo">Intenção de Empréstimo</option>
+                  <option value="outro">Outro</option>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Urgência</Label>
+                <Select {...criarForm.register('urgencia')}>
+                  <option value="normal">Normal</option>
+                  <option value="alta">Alta</option>
+                </Select>
+              </div>
             </div>
 
+            {/* Descrição */}
             <div className="space-y-1.5">
-              <Label>Descrição</Label>
-              <Textarea placeholder="Descreva o pedido..." rows={3} {...criarForm.register('descricao')} />
+              <Label>Descrição <span className="text-destructive">*</span></Label>
+              <Textarea placeholder="Descreva o pedido com detalhes..." rows={3} {...criarForm.register('descricao')} />
               {criarForm.formState.errors.descricao && (
                 <p className="text-xs text-destructive">{criarForm.formState.errors.descricao.message}</p>
               )}
             </div>
 
+            {/* Valor */}
             <div className="space-y-1.5">
-              <Label>Valor solicitado (opcional)</Label>
+              <Label>Valor solicitado <span className="text-muted-foreground text-xs">(opcional)</span></Label>
               <Input type="number" step="0.01" min="0" placeholder="0,00" {...criarForm.register('valorSolicitado')} />
             </div>
 
+            {criarMutation.isError && (
+              <p className="text-xs text-destructive">Erro ao enviar solicitação. Tente novamente.</p>
+            )}
+
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setShowCriar(false)}>Cancelar</Button>
+              <Button type="button" variant="outline" onClick={() => { setShowCriar(false); criarForm.reset() }}>
+                Cancelar
+              </Button>
               <Button type="submit" disabled={criarMutation.isPending}>
-                {criarMutation.isPending ? 'Enviando...' : 'Enviar'}
+                {criarMutation.isPending ? 'Enviando...' : 'Enviar Solicitação'}
               </Button>
             </div>
           </form>
@@ -297,9 +377,21 @@ export default function SolicitacoesPage() {
             )}
             className="space-y-4"
           >
-            <div className="rounded-lg bg-slate-50 border p-3 text-sm">
-              <p className="font-medium">{respondendo.client.nome}</p>
+            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border p-3 text-sm space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium">{respondendo.client.nome}</span>
+                <Badge variant="outline" className="text-xs">{tipoLabel[respondendo.tipo] ?? respondendo.tipo}</Badge>
+                {respondendo.urgencia === 'alta' && (
+                  <Badge variant="destructive" className="gap-1 text-xs">
+                    <AlertTriangle className="size-3" />
+                    Alta urgência
+                  </Badge>
+                )}
+              </div>
               <p className="text-muted-foreground">{respondendo.descricao}</p>
+              {respondendo.valorSolicitado != null && (
+                <p className="text-xs text-muted-foreground">Valor: {formatCurrency(respondendo.valorSolicitado)}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -311,7 +403,7 @@ export default function SolicitacoesPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Resposta (opcional)</Label>
+              <Label>Resposta <span className="text-muted-foreground text-xs">(opcional)</span></Label>
               <Textarea placeholder="Mensagem para o consultor..." rows={2} {...responderForm.register('respostaFinanceiro')} />
             </div>
 

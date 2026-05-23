@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate, STATUS_LOAN } from '@/lib/utils'
-import api from '@/lib/api'
+import { portalClient } from '@/lib/portal/portal-client'
 
 interface Contrato {
   id: number
@@ -24,7 +24,7 @@ interface Contrato {
 export default function ContratosPage() {
   const { data, isLoading } = useQuery<Contrato[]>({
     queryKey: ['portal-contratos'],
-    queryFn: () => api.get('/portal/contratos').then(r => r.data),
+    queryFn: () => portalClient.get('/portal/contratos').then(r => r.data),
   })
 
   return (

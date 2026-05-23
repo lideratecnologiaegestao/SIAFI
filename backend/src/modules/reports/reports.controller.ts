@@ -41,4 +41,10 @@ export class ReportsController {
   getFaturamento(@Query('mes') mes: string) {
     return this.reportsService.getFaturamentoMensal(mes);
   }
+
+  @Get('evolucao')
+  @Roles('admin', 'financeiro')
+  getEvolucao(@Query('meses') meses?: string) {
+    return this.reportsService.getEvolucao(Math.min(Math.max(Number(meses) || 6, 2), 12));
+  }
 }

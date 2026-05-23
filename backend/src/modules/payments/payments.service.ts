@@ -203,6 +203,32 @@ export class PaymentsService {
     });
   }
 
+  // Pagamentos registrados hoje — dashboard do caixa.
+  async findHoje(): Promise<unknown[]> {
+    const hoje = new Date();
+    const inicioDia = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0);
+    const fimDia    = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
+
+    return this.prisma.payment.findMany({
+      where: {
+        dataPagamento: { gte: inicioDia, lte: fimDia },
+        estornado: false,
+      },
+      orderBy: { dataPagamento: 'desc' },
+      include: {
+        installment: {
+          include: {
+            loan: {
+              include: {
+                client: { select: { id: true, nome: true, nomeSocial: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
   async estornar(id: number, userId?: number): Promise<unknown> {
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Buscar pagamento com parcela e loan

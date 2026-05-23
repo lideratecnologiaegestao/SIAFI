@@ -31,6 +31,11 @@ export class CreateSolicitacaoDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   valorSolicitado?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['normal', 'alta'])
+  urgencia?: string;
 }
 
 export class ResponderSolicitacaoDto {

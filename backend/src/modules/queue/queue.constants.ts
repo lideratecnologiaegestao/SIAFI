@@ -29,3 +29,14 @@ export const JOB_CAPITAL_LIBERADO            = 'proposta.capital-liberado';
 // Job names — cobrança antecipada
 export const JOB_WA_COBRANCA_ANTECIPADA     = 'whatsapp.cobranca-antecipada';
 export const JOB_EMAIL_COBRANCA_ANTECIPADA  = 'email.cobranca-antecipada';
+
+// Job names — link de acesso ao portal (substituiu senha temporária)
+export const JOB_EMAIL_LINK_ACESSO = 'email.link-acesso';
+
+// Job names — aceite de contrato
+export const JOB_EMAIL_ACEITE_CONTRATO  = 'email.aceite-contrato';
+export const JOB_WA_ACEITE_CONTRATO     = 'whatsapp.aceite-contrato';
+
+// Job names — capital liberado
+export const JOB_EMAIL_CAPITAL_LIBERADO = 'email.capital-liberado';
+export const JOB_WA_CAPITAL_LIBERADO    = 'whatsapp.capital-liberado';

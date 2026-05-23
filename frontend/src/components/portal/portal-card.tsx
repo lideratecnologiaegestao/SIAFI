@@ -64,7 +64,7 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
   const [showAtivar, setShowAtivar] = useState(false)
   const [showDesativar, setShowDesativar] = useState(false)
   const [motivo, setMotivo] = useState('')
-  const [senhaExibida, setSenhaExibida] = useState<string | null>(null)
+  const [linkEnviado, setLinkEnviado] = useState(false)
 
   const { data: status, isLoading } = useQuery<PortalStatus>({
     queryKey: ['portal-status', clientId],
@@ -74,10 +74,10 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
 
   const ativarMutation = useMutation({
     mutationFn: () => api.post(`/clients/${clientId}/portal/ativar`),
-    onSuccess: (res) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['portal-status', clientId] })
       setShowAtivar(false)
-      if (res.data.senhaTemporaria) setSenhaExibida(res.data.senhaTemporaria)
+      setLinkEnviado(true)
     },
   })
 
@@ -97,7 +97,10 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
 
   const reenviarMutation = useMutation({
     mutationFn: () => api.post(`/clients/${clientId}/portal/reenviar-senha`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal-status', clientId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['portal-status', clientId] })
+      setLinkEnviado(true)
+    },
   })
 
   if (!canManage) return null
@@ -195,9 +198,14 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
                 </p>
               </div>
             </div>
-            {(s.senhaTemporaria || s.primeiroAcesso) && (
+            {s.primeiroAcesso && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                ⚠️ Cliente ainda não trocou a senha temporária
+                ⚠️ Cliente ainda não definiu sua senha de acesso
+              </div>
+            )}
+            {linkEnviado && (
+              <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
+                ✅ Link de acesso enviado para o email do cliente
               </div>
             )}
             <div className="flex gap-2">
@@ -208,7 +216,7 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
                 disabled={reenviarMutation.isPending}
               >
                 <KeyRound className="size-3.5 mr-1.5" />
-                {reenviarMutation.isPending ? 'Enviando...' : 'Reenviar senha'}
+                {reenviarMutation.isPending ? 'Enviando...' : 'Enviar link de redefinição de senha'}
               </Button>
               {canDeactivate && (
                 <Button
@@ -255,19 +263,6 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
           </Modal>
         )}
 
-        {/* Modal senha exibida */}
-        {senhaExibida && (
-          <Modal title="Portal reativado!" onClose={() => setSenhaExibida(null)}>
-            <div className="space-y-3 text-sm">
-              <p>Nova senha temporária enviada ao cliente. Também exibida aqui para garantia:</p>
-              <div className="rounded-lg bg-slate-50 border px-4 py-3 text-center">
-                <p className="font-mono text-lg font-semibold tracking-widest">{senhaExibida}</p>
-              </div>
-              <p className="text-xs text-muted-foreground">Esta senha não será exibida novamente. Envie ao cliente se necessário.</p>
-              <Button className="w-full" onClick={() => setSenhaExibida(null)}>Fechar</Button>
-            </div>
-          </Modal>
-        )}
       </>
     )
   }
@@ -304,7 +299,7 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
                 <p className="font-medium">👤 {clienteNome}</p>
                 {clienteEmail && <p>📧 {clienteEmail}</p>}
               </div>
-              <p className="text-muted-foreground">O cliente receberá uma senha temporária via WhatsApp e email.</p>
+              <p className="text-muted-foreground">O cliente receberá um link por email para criar sua própria senha. O link é válido por 12 horas.</p>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowAtivar(false)}>Cancelar</Button>
@@ -319,19 +314,6 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
         </Modal>
       )}
 
-      {/* Modal senha exibida */}
-      {senhaExibida && (
-        <Modal title="Portal ativado com sucesso! 🎉" onClose={() => setSenhaExibida(null)}>
-          <div className="space-y-3 text-sm">
-            <p>Senha temporária gerada. Também disponível aqui por segurança:</p>
-            <div className="rounded-lg bg-slate-50 border px-4 py-3 text-center">
-              <p className="font-mono text-lg font-semibold tracking-widest">{senhaExibida}</p>
-            </div>
-            <p className="text-xs text-muted-foreground">Esta senha não será exibida novamente.</p>
-            <Button className="w-full" onClick={() => setSenhaExibida(null)}>Fechar</Button>
-          </div>
-        </Modal>
-      )}
     </>
   )
 }

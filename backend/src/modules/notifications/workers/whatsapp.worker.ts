@@ -24,6 +24,9 @@ export class WhatsAppWorker extends WorkerHost {
   }
 
   async process(job: Job<NotificationJobData>): Promise<void> {
+    // Este worker só processa jobs de WhatsApp; email jobs são ignorados aqui
+    if (!job.name.startsWith('whatsapp.')) return;
+
     const { clienteNome, clienteWhatsapp, valorParcela, dataVencimento, senhaTemporaria } = job.data;
 
     if (!clienteWhatsapp) {

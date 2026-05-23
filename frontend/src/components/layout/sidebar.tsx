@@ -8,6 +8,7 @@ import {
   ArrowLeftRight, Settings, Shield, LogOut, X, ChevronRight,
   AlertCircle, RefreshCcw, QrCode, BarChart2, Bell, MessageSquare,
   UserCog, ListChecks, Briefcase, ClipboardList, TrendingUp, Phone,
+  Banknote, Search, Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth.context'
@@ -19,69 +20,166 @@ interface NavItem {
   href: string
   icon: React.ElementType
   roles?: string[]
+  badge?: 'unread'
 }
 
 interface NavGroup {
   title: string
+  roles?: string[]
   items: NavItem[]
 }
 
+// ─── Grupos por perfil ───────────────────────────────────────────────────────
+
 const navGroups: NavGroup[] = [
+  // ── Principal (todos os perfis autenticados) ──────────────────────────────
   {
     title: 'Principal',
     items: [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     ],
   },
+
+  // ── Fila de Trabalho (financeiro / admin) ─────────────────────────────────
+  {
+    title: 'Fila de Trabalho',
+    roles: ['admin', 'financeiro'],
+    items: [
+      { label: 'Intenções',            href: '/intencoes',            icon: TrendingUp },
+      { label: 'Liberações Pendentes', href: '/liberacoes-pendentes', icon: Banknote },
+      { label: 'Reparcelamentos',      href: '/reparcelamentos',      icon: RefreshCcw },
+    ],
+  },
+
+  // ── Operacional (financeiro / admin) ──────────────────────────────────────
   {
     title: 'Operacional',
+    roles: ['admin', 'financeiro'],
     items: [
-      { label: 'Clientes', href: '/clientes', icon: Users, roles: ['admin', 'financeiro', 'caixa'] },
-      { label: 'Empréstimos', href: '/emprestimos', icon: CreditCard, roles: ['admin', 'financeiro'] },
-      { label: 'Parcelas', href: '/parcelas', icon: Receipt, roles: ['admin', 'financeiro', 'caixa'] },
-      { label: 'Pagamentos', href: '/pagamentos', icon: Wallet, roles: ['admin', 'financeiro', 'caixa'] },
-      { label: 'Inadimplentes', href: '/inadimplentes', icon: AlertCircle, roles: ['admin', 'financeiro'] },
+      { label: 'Clientes',      href: '/clientes',      icon: Users },
+      { label: 'Empréstimos',   href: '/emprestimos',   icon: CreditCard },
+      { label: 'Parcelas',      href: '/parcelas',      icon: Receipt },
+      { label: 'Pagamentos',    href: '/pagamentos',    icon: Wallet },
+      { label: 'Inadimplentes', href: '/inadimplentes', icon: AlertCircle },
     ],
   },
+
+  // ── Financeiro (financeiro / admin) ───────────────────────────────────────
   {
     title: 'Financeiro',
+    roles: ['admin', 'financeiro'],
     items: [
-      { label: 'Caixa', href: '/caixa', icon: ArrowLeftRight, roles: ['admin', 'financeiro', 'caixa'] },
-      { label: 'Renegociações',    href: '/renegociacoes',    icon: RefreshCcw, roles: ['admin', 'financeiro'] },
-      { label: 'Reparcelamentos',  href: '/reparcelamentos',  icon: RefreshCcw, roles: ['admin', 'financeiro', 'consultor'] },
-      { label: 'Conciliação', href: '/conciliacao', icon: ListChecks, roles: ['admin', 'financeiro'] },
-      { label: 'PIX', href: '/pix', icon: QrCode, roles: ['admin', 'financeiro'] },
+      { label: 'Caixa',         href: '/caixa',         icon: ArrowLeftRight },
+      { label: 'Renegociações', href: '/renegociacoes', icon: RefreshCcw },
+      { label: 'Conciliação',   href: '/conciliacao',   icon: ListChecks },
+      { label: 'PIX',           href: '/pix',           icon: QrCode },
     ],
   },
+
+  // ── Relatórios e Comunicação (financeiro / admin) ─────────────────────────
   {
     title: 'Relatórios',
+    roles: ['admin', 'financeiro'],
     items: [
-      { label: 'Relatórios', href: '/relatorios', icon: BarChart2, roles: ['admin', 'financeiro'] },
+      { label: 'Relatórios',   href: '/relatorios',   icon: BarChart2 },
+      { label: 'Notificações', href: '/notificacoes', icon: Bell },
     ],
   },
+
+  // ── Minha Carteira (consultor) ────────────────────────────────────────────
   {
-    title: 'Consultor',
+    title: 'Minha Carteira',
+    roles: ['consultor'],
     items: [
-      { label: 'Minha Carteira', href: '/consultor/carteira', icon: Briefcase, roles: ['consultor'] },
-      { label: 'Solicitações', href: '/solicitacoes', icon: ClipboardList, roles: ['consultor', 'admin', 'financeiro'] },
-      { label: 'Intenções', href: '/intencoes', icon: TrendingUp, roles: ['consultor', 'admin', 'financeiro'] },
-      { label: 'Cobranças', href: '/cobrancas', icon: Phone, roles: ['consultor', 'admin', 'financeiro'] },
+      { label: 'Clientes',   href: '/clientes',   icon: Users },
+      { label: 'Intenções',  href: '/intencoes',  icon: TrendingUp },
+      { label: 'Solicitações', href: '/solicitacoes', icon: ClipboardList },
+      { label: 'Cobranças',  href: '/cobrancas',  icon: Phone },
     ],
   },
+
+  // ── Ferramentas do Consultor ───────────────────────────────────────────────
+  {
+    title: 'Ferramentas',
+    roles: ['consultor'],
+    items: [
+      { label: 'PIX / Boleto',       href: '/pix',                   icon: QrCode },
+      { label: 'Reparcelamentos',    href: '/reparcelamentos',        icon: RefreshCcw },
+      { label: 'Relatórios',         href: '/consultor/relatorios',  icon: BarChart2 },
+    ],
+  },
+
+  // ── Operações do Caixa ────────────────────────────────────────────────────
+  {
+    title: 'Operações',
+    roles: ['caixa'],
+    items: [
+      { label: 'Liberar Capital',     href: '/liberacoes-pendentes', icon: Banknote },
+      { label: 'Registrar Pagamento', href: '/pagamentos/novo',      icon: Wallet },
+      { label: 'Parcelas do Dia',     href: '/parcelas',             icon: Receipt },
+    ],
+  },
+
+  // ── Consulta (caixa) ──────────────────────────────────────────────────────
+  {
+    title: 'Consulta',
+    roles: ['caixa'],
+    items: [
+      { label: 'Consultar Cliente', href: '/clientes', icon: Search },
+    ],
+  },
+
+  // ── Caixa (caixa) ─────────────────────────────────────────────────────────
+  {
+    title: 'Caixa',
+    roles: ['caixa'],
+    items: [
+      { label: 'Saldo e Movimentações', href: '/caixa', icon: ArrowLeftRight },
+    ],
+  },
+
+  // ── Administração (financeiro aparece em Solicitações; admin vê tudo) ─────
+  {
+    title: 'Atendimento',
+    roles: ['admin', 'financeiro'],
+    items: [
+      { label: 'Solicitações', href: '/solicitacoes', icon: ClipboardList },
+      { label: 'Cobranças',    href: '/cobrancas',    icon: Phone },
+      { label: 'Suporte',      href: '/suporte',      icon: MessageSquare },
+    ],
+  },
+
+  // ── Comunicação (todos exceto cliente) ────────────────────────────────────
   {
     title: 'Comunicação',
     items: [
-      { label: 'Mensagens',    href: '/mensagens',    icon: MessageSquare, roles: ['admin', 'financeiro', 'consultor', 'caixa'] },
-      { label: 'Notificações', href: '/notificacoes', icon: Bell, roles: ['admin', 'financeiro'] },
-      { label: 'Suporte', href: '/suporte', icon: MessageSquare, roles: ['admin', 'financeiro', 'caixa'] },
+      {
+        label: 'Mensagens',
+        href: '/mensagens',
+        icon: MessageSquare,
+        badge: 'unread',
+      },
     ],
   },
+
+  // ── Comunicação Caixa (suporte) ───────────────────────────────────────────
+  {
+    title: 'Suporte',
+    roles: ['caixa'],
+    items: [
+      { label: 'Suporte', href: '/suporte', icon: MessageSquare },
+    ],
+  },
+
+  // ── Administração (admin only) ────────────────────────────────────────────
   {
     title: 'Administração',
+    roles: ['admin'],
     items: [
-      { label: 'Usuários', href: '/usuarios', icon: UserCog, roles: ['admin'] },
-      { label: 'Configurações', href: '/configuracoes', icon: Settings, roles: ['admin'] },
-      { label: 'Auditoria', href: '/auditoria', icon: Shield, roles: ['admin'] },
+      { label: 'Usuários',           href: '/usuarios',               icon: UserCog },
+      { label: 'Configurações',      href: '/configuracoes',          icon: Settings },
+      { label: 'Templates de Email', href: '/configuracoes/emails',   icon: Mail },
+      { label: 'Auditoria',          href: '/auditoria',              icon: Shield },
     ],
   },
 ]
@@ -96,12 +194,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, logout } = useAuth()
   const unreadCount = useUnreadCount()
 
-  const visibleGroups = navGroups.map((group) => ({
-    ...group,
-    items: group.items.filter(
-      (item) => !item.roles || (user && item.roles.includes(user.role))
-    ),
-  })).filter((group) => group.items.length > 0)
+  const visibleGroups = navGroups
+    .filter((group) => !group.roles || (user && group.roles.includes(user.role)))
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) => !item.roles || (user && item.roles.includes(user.role))
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
 
   function isActive(href: string) {
     if (href === '/dashboard') return pathname === '/dashboard'
@@ -162,9 +263,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               {group.items.map((item) => {
                 const Icon = item.icon
                 const active = isActive(item.href)
+                const badgeCount = item.badge === 'unread' ? unreadCount : 0
                 return (
                   <Link
-                    key={item.href}
+                    key={item.href + item.label}
                     href={item.href}
                     onClick={onClose}
                     className={cn(
@@ -176,9 +278,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                   >
                     <Icon className="size-4 shrink-0" />
                     <span className="flex-1">{item.label}</span>
-                    {item.href === '/mensagens' && unreadCount > 0 && !active && (
+                    {badgeCount > 0 && !active && (
                       <span className="min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center px-1 font-bold">
-                        {unreadCount > 9 ? '9+' : unreadCount}
+                        {badgeCount > 9 ? '9+' : badgeCount}
                       </span>
                     )}
                     {active && <ChevronRight className="size-3 opacity-60" />}

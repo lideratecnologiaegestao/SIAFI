@@ -5,12 +5,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod/v4'
-import { PlusCircle, CheckCircle, XCircle, MessageSquare, Clock, TrendingUp } from 'lucide-react'
+import { PlusCircle, CheckCircle, XCircle, MessageSquare, Clock, TrendingUp, User, ChevronDown, ChevronUp, HelpCircle, AlertTriangle, Info } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -19,6 +20,7 @@ import {
 import { formatCurrency, formatDate, formatDateTime, METODO_PAGAMENTO } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth.context'
 import api from '@/lib/api'
+import Link from 'next/link'
 import Decimal from 'decimal.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -37,8 +39,22 @@ interface IntencaoItem {
   feedbackEnviadoEm?: string | null
   feedbackCanal?: string | null
   createdAt: string
-  client: { id: number; nome: string; portalAtivo: boolean; scoreRisco: ScoreRisco | null }
+  client: {
+    id: number; nome: string; nomeSocial?: string | null
+    cpf?: string | null; whatsapp?: string | null; email?: string | null
+    portalAtivo: boolean; scoreRisco: ScoreRisco | null
+  }
   consultor: { id: number; nome: string }
+}
+
+interface LoanItem {
+  id: number
+  status: string
+  principalAmount: number
+  totalReceivable: number
+  numeroParcelas: number
+  dataInicio: string
+  createdAt: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -120,6 +136,71 @@ function safeDecimal(v: unknown) {
   return d.isNaN() ? new Decimal(0) : d
 }
 
+const STATUS_LOAN_LABEL: Record<string, string> = {
+  aguardando_aceite:    'Aguardando aceite',
+  aguardando_liberacao: 'Aguardando liberação',
+  ativo:      'Ativo',
+  quitado:    'Quitado',
+  cancelado:  'Cancelado',
+}
+
+function ClientDetailPanel({
+  client,
+  loans,
+  loadingLoans,
+  canViewLoans,
+}: {
+  client: IntencaoItem['client']
+  loans?: LoanItem[]
+  loadingLoans: boolean
+  canViewLoans: boolean
+}) {
+  const info = [
+    client.cpf && `CPF: ${client.cpf}`,
+    client.whatsapp && `WhatsApp: ${client.whatsapp}`,
+    client.email && `Email: ${client.email}`,
+  ].filter(Boolean)
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex items-start gap-4 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-base">
+            {client.nome}{client.nomeSocial ? ` (${client.nomeSocial})` : ''}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
+            {info.map((i, idx) => <span key={idx}>{i}</span>)}
+          </div>
+        </div>
+        <ScoreBadge score={client.scoreRisco} />
+      </div>
+
+      {canViewLoans && (
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Histórico de contratos</p>
+          {loadingLoans ? (
+            <div className="space-y-1"><Skeleton className="h-6 w-full" /><Skeleton className="h-6 w-3/4" /></div>
+          ) : loans && loans.length > 0 ? (
+            <div className="space-y-1">
+              {loans.map(loan => (
+                <div key={loan.id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-1.5 text-xs">
+                  <span className="font-medium">#{loan.id}</span>
+                  <span>{STATUS_LOAN_LABEL[loan.status] ?? loan.status}</span>
+                  <span>{loan.numeroParcelas}x de {formatCurrency(Number(loan.totalReceivable) / loan.numeroParcelas)}</span>
+                  <span className="text-muted-foreground">{formatDate(loan.dataInicio)}</span>
+                  <a href={`/emprestimos/${loan.id}`} className="text-blue-600 hover:underline">ver</a>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Nenhum contrato anterior.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function IntencoesPage() {
@@ -134,6 +215,10 @@ export default function IntencoesPage() {
   const [openRejeitar, setOpenRejeitar]   = useState<IntencaoItem | null>(null)
   const [openFeedback, setOpenFeedback]   = useState<IntencaoItem | null>(null)
   const [feedbackCanal, setFeedbackCanal] = useState('whatsapp')
+  const [openSolicitarInfo, setOpenSolicitarInfo] = useState<IntencaoItem | null>(null)
+  const [infoMensagem, setInfoMensagem]   = useState('')
+  const [clienteDetalhe, setClienteDetalhe] = useState<number | null>(null)
+  const [aprovarError, setAprovarError]   = useState<string | null>(null)
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -152,6 +237,16 @@ export default function IntencoesPage() {
     enabled: openCreate,
   })
 
+  const canViewLoans = user?.role === 'admin' || user?.role === 'financeiro'
+  const { data: clientLoans = [], isLoading: loadingClientLoans } = useQuery({
+    queryKey: ['client-loans', clienteDetalhe],
+    queryFn: () =>
+      api.get<{ data: LoanItem[] }>('/loans', { params: { clientId: clienteDetalhe, limit: 20 } })
+        .then(r => r.data.data),
+    enabled: clienteDetalhe !== null && canViewLoans,
+    retry: 1,
+  })
+
   // ── Mutations ────────────────────────────────────────────────────────────
 
   const createMut = useMutation({
@@ -164,9 +259,25 @@ export default function IntencoesPage() {
   })
 
   const aprovarMut = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: AprovarForm }) =>
-      api.patch(`/intencoes/${id}/aprovar`, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['intencoes'] }); setOpenAprovar(null) },
+    mutationFn: ({ id, data }: { id: number; data: AprovarForm }) => {
+      const payload = {
+        ...data,
+        // Empty string from <select> would fail @IsEnum — send only valid values
+        metodoPagamento: data.metodoPagamento || undefined,
+        observacoes:     data.observacoes     || undefined,
+      }
+      return api.patch(`/intencoes/${id}/aprovar`, payload)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['intencoes'] })
+      setAprovarError(null)
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message ?? err?.message ?? 'Erro ao aprovar intenção'
+      setAprovarError(Array.isArray(msg) ? msg.join('; ') : String(msg))
+      // Revert optimistic update
+      qc.invalidateQueries({ queryKey: ['intencoes'] })
+    },
   })
 
   const rejeitarMut = useMutation({
@@ -179,6 +290,15 @@ export default function IntencoesPage() {
     mutationFn: ({ id, canal }: { id: number; canal: string }) =>
       api.patch(`/intencoes/${id}/feedback`, { canal }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['intencoes'] }); setOpenFeedback(null) },
+  })
+
+  const solicitarInfoMut = useMutation({
+    mutationFn: ({ id, mensagem }: { id: number; mensagem: string }) =>
+      api.patch(`/intencoes/${id}/solicitar-info`, { mensagem }),
+    onSuccess: () => {
+      setOpenSolicitarInfo(null)
+      setInfoMensagem('')
+    },
   })
 
   // ── Forms ────────────────────────────────────────────────────────────────
@@ -198,12 +318,23 @@ export default function IntencoesPage() {
 
   function abrirAprovar(item: IntencaoItem) {
     setOpenAprovar(item)
+    setAprovarError(null)
     formAprovar.reset({
       principalAmount: Number(item.valorSolicitado),
       targetProfit:    0,
       numeroParcelas:  item.numeroParcelas,
       dataInicio:      new Date().toISOString().split('T')[0],
     })
+  }
+
+  function handleAprovarSubmit(data: AprovarForm) {
+    const item = openAprovar!
+    setOpenAprovar(null)
+    // Optimistic: mark as aprovado immediately in cache
+    qc.setQueryData(['intencoes', statusFiltro], (old: IntencaoItem[] | undefined) =>
+      old ? old.map(i => i.id === item.id ? { ...i, status: 'aprovado' } : i) : old
+    )
+    aprovarMut.mutate({ id: item.id, data })
   }
 
   // ── Tabs ─────────────────────────────────────────────────────────────────
@@ -259,6 +390,14 @@ export default function IntencoesPage() {
         ))}
       </div>
 
+      {/* Error banner for failed approvals */}
+      {aprovarError && (
+        <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400 flex items-center justify-between">
+          <span><strong>Erro ao aprovar:</strong> {aprovarError}</span>
+          <button onClick={() => setAprovarError(null)} className="ml-4 text-red-400 hover:text-red-600 font-bold">×</button>
+        </div>
+      )}
+
       {/* List */}
       {isLoading ? (
         <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full" />)}</div>
@@ -306,8 +445,20 @@ export default function IntencoesPage() {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
+                      <Button size="sm" variant="ghost" className="gap-1 text-muted-foreground"
+                        onClick={() => setClienteDetalhe(clienteDetalhe === item.client.id ? null : item.client.id)}>
+                        <User className="size-3.5" />Ver cliente
+                        {clienteDetalhe === item.client.id
+                          ? <ChevronUp className="size-3" />
+                          : <ChevronDown className="size-3" />}
+                      </Button>
                       {canApprove && item.status === 'aguardando' && (
                         <>
+                          <Button size="sm" variant="outline"
+                            className="gap-1 text-blue-600 border-blue-200 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                            onClick={() => { setOpenSolicitarInfo(item); setInfoMensagem('') }}>
+                            <HelpCircle className="size-3.5" />Pedir info
+                          </Button>
                           <Button size="sm" variant="outline"
                             className="gap-1 text-green-600 border-green-200 hover:bg-green-50 dark:hover:bg-green-950/30"
                             onClick={() => abrirAprovar(item)}>
@@ -328,6 +479,17 @@ export default function IntencoesPage() {
                       )}
                     </div>
                   </div>
+                  {/* ── Painel inline de dados do cliente ── */}
+                  {clienteDetalhe === item.client.id && (
+                    <div className="mt-3 border-t pt-3">
+                      <ClientDetailPanel
+                        client={item.client}
+                        loans={clientLoans}
+                        loadingLoans={loadingClientLoans}
+                        canViewLoans={canViewLoans}
+                      />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )
@@ -377,8 +539,39 @@ export default function IntencoesPage() {
           <DialogHeader>
             <DialogTitle>Aprovar Intenção #{openAprovar?.id} — {openAprovar?.client.nome}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={formAprovar.handleSubmit(d => aprovarMut.mutate({ id: openAprovar!.id, data: d }))}
-            className="space-y-4">
+
+          {/* Aviso sobre status do portal do cliente */}
+          {openAprovar && (
+            <div className="space-y-2 -mt-1">
+              {!openAprovar.client.email && (
+                <div className="rounded-md bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-700 px-3 py-2.5 text-sm text-yellow-800 dark:text-yellow-300 flex items-start gap-2">
+                  <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Cliente sem email cadastrado.</strong> O link de aceite não será enviado por email.{' '}
+                    <a href={`/clientes/${openAprovar.client.id}/editar`} className="underline font-medium">Cadastre o email</a> antes de aprovar ou notifique o cliente manualmente.
+                  </span>
+                </div>
+              )}
+              {openAprovar.client.email && !openAprovar.client.portalAtivo && (
+                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-700 px-3 py-2.5 text-sm text-blue-800 dark:text-blue-300 flex items-start gap-2">
+                  <Info className="size-4 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Portal não ativo.</strong> O portal será ativado automaticamente e um email de ativação com link para assinar o contrato será enviado para <strong>{openAprovar.client.email}</strong>.
+                  </span>
+                </div>
+              )}
+              {openAprovar.client.email && openAprovar.client.portalAtivo && (
+                <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-700 px-3 py-2.5 text-sm text-green-800 dark:text-green-300 flex items-start gap-2">
+                  <CheckCircle className="size-4 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Portal ativo.</strong> O cliente receberá um email com link direto para assinar o contrato em <strong>{openAprovar.client.email}</strong>.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <form onSubmit={formAprovar.handleSubmit(handleAprovarSubmit)} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Capital Emprestado (R$)</Label>
@@ -412,8 +605,8 @@ export default function IntencoesPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpenAprovar(null)}>Cancelar</Button>
-              <Button type="submit" disabled={aprovarMut.isPending} className="bg-green-600 hover:bg-green-700">
-                {aprovarMut.isPending ? 'Aprovando...' : 'Confirmar Aprovação'}
+              <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                Confirmar Aprovação
               </Button>
             </DialogFooter>
           </form>
@@ -444,6 +637,46 @@ export default function IntencoesPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal: Solicitar informações ────────────────────────────────── */}
+      <Dialog open={!!openSolicitarInfo} onOpenChange={v => !v && setOpenSolicitarInfo(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HelpCircle className="size-4 text-blue-500" />
+              Solicitar informações
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Envie uma mensagem ao consultor <strong>{openSolicitarInfo?.consultor.nome}</strong> pedindo mais informações sobre a intenção de{' '}
+              <strong>{openSolicitarInfo?.client.nome}</strong>.
+            </p>
+            <div className="space-y-1.5">
+              <Label>Mensagem</Label>
+              <Textarea
+                rows={3}
+                placeholder="Ex: Precisamos do comprovante de renda do cliente..."
+                value={infoMensagem}
+                onChange={e => setInfoMensagem(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              A mensagem será enviada via chat interno. Você pode acompanhar a resposta em{' '}
+              <Link href="/mensagens" className="text-blue-600 hover:underline">Mensagens</Link>.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpenSolicitarInfo(null)}>Cancelar</Button>
+            <Button
+              disabled={solicitarInfoMut.isPending || infoMensagem.trim().length < 5}
+              onClick={() => openSolicitarInfo && solicitarInfoMut.mutate({ id: openSolicitarInfo.id, mensagem: infoMensagem.trim() })}
+            >
+              {solicitarInfoMut.isPending ? 'Enviando...' : 'Enviar mensagem'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

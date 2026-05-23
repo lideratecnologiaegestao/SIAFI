@@ -201,6 +201,7 @@ model ConsultorSolicitacao {
   tipo               String    @db.VarChar(30)
   descricao          String    @db.Text
   valorSolicitado    Decimal?  @db.Decimal(10, 2) @map("valor_solicitado")
+  urgencia           String    @default("normal") @db.VarChar(10)
   status             String    @default("pendente") @db.VarChar(20)
   respostaFinanceiro String?   @db.Text @map("resposta_financeiro")
   respondidoPor      Int?      @map("respondido_por")
@@ -777,4 +778,21 @@ model CreditScore {
   @@index([clientId])
   @@index([validoAte])
   @@map("credit_scores")
+}
+
+
+// ─── EmailTemplate ─────────────────────────────────────────────────────────────
+
+model EmailTemplate {
+  id          Int      @id @default(autoincrement())
+  slug        String   @unique @db.VarChar(60)
+  nome        String   @db.VarChar(120)
+  assunto     String   @db.VarChar(255)
+  corpo       String   @db.Text
+  variaveis   String[] @default([])
+  ativo       Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@map("email_templates")
 }

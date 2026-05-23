@@ -41,6 +41,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
+    tokenStore.onAuthLost = () => { setUser(null) }
+    return () => { tokenStore.onAuthLost = null }
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
 
     async function init() {
@@ -83,13 +88,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) { setUser(me); return }
       } catch {}
 
-      // 3. Check Supabase session (Google OAuth)
+      // 3. Check Supabase session (Google OAuth staff only — NEVER client sessions)
       try {
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.access_token) {
-          tokenStore.set(session.access_token)
-          const me = await fetchMe()
-          if (!cancelled) setUser(me)
+          // Decode JWT to reject client sessions — prevents a client Supabase session
+          // stored in a staff browser from silently authenticating as the wrong user
+          const parts = session.access_token.split('.')
+          const payload = parts[1]
+            ? JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))
+            : {}
+          const appRole = (payload?.app_metadata as Record<string, unknown> | undefined)?.role
+          if (appRole !== 'cliente') {
+            tokenStore.set(session.access_token)
+            const me = await fetchMe()
+            if (!cancelled) setUser(me)
+          }
         }
       } catch {}
     }

@@ -12,7 +12,6 @@ import { LoansService } from '../loans/loans.service';
 import {
   QUEUE_FINANCE_NOTIFICATIONS,
   JOB_INTENCAO_NOVA,
-  JOB_INTENCAO_APROVADA,
   JOB_INTENCAO_REJEITADA,
 } from '../queue/queue.constants';
 import type { NotificationJobData } from '../queue/queue.interfaces';
@@ -20,6 +19,8 @@ import { CreateIntencaoDto } from './dto/create-intencao.dto';
 import { AprovarIntencaoDto } from './dto/aprovar-intencao.dto';
 import { RejeitarIntencaoDto } from './dto/rejeitar-intencao.dto';
 import { FeedbackIntencaoDto } from './dto/feedback-intencao.dto';
+import { PortalService } from '../client-portal/portal.service';
+import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 
 const INCLUDE_DETAIL = {
   client: {
@@ -43,6 +44,7 @@ export class IntencaoService {
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     private readonly loansService: LoansService,
+    private readonly portalService: PortalService,
     @InjectQueue(QUEUE_FINANCE_NOTIFICATIONS)
     private readonly queue: Queue<NotificationJobData>,
   ) {}
@@ -115,7 +117,7 @@ export class IntencaoService {
     return intencao;
   }
 
-  async aprovar(id: number, dto: AprovarIntencaoDto, userId: number): Promise<unknown> {
+  async aprovar(id: number, dto: AprovarIntencaoDto, user: RequestUser): Promise<unknown> {
     const intencao = await this.prisma.intencaoEmprestimo.findUnique({
       where: { id },
       include: { client: { select: { id: true, nome: true, active: true, portalAtivo: true, whatsapp: true, email: true } } },
@@ -135,7 +137,7 @@ export class IntencaoService {
         principalAmount: dto.principalAmount,
         targetProfit:    dto.targetProfit,
         numeroParcelas:  dto.numeroParcelas,
-        dataInicio:      dto.dataInicio,  // provisória — será reajustada em liberarCapital
+        dataInicio:      dto.dataInicio,
         metodoPagamento: dto.metodoPagamento,
         observacoes:     dto.observacoes,
       },
@@ -146,29 +148,17 @@ export class IntencaoService {
       },
     ) as { id: number };
 
-    const now = new Date();
-    await this.prisma.$transaction(async (tx) => {
-      await tx.intencaoEmprestimo.update({
-        where: { id },
-        data: { status: 'aprovado', loanId: loan.id, aprovadoPor: userId, aprovadoEm: now },
-      });
-
-      if (!intencao.client.portalAtivo) {
-        await tx.client.update({
-          where: { id: intencao.clientId },
-          data: { portalAtivo: true, portalAtivadoEm: now, portalAtivadoPor: userId },
-        });
-      }
+    await this.prisma.intencaoEmprestimo.update({
+      where: { id },
+      data: { status: 'aprovado', loanId: loan.id, aprovadoPor: user.id, aprovadoEm: new Date() },
     });
 
-    void this.queue.add(JOB_INTENCAO_APROVADA, {
-      clientId:        intencao.clientId,
-      clienteNome:     intencao.client.nome,
-      clienteWhatsapp: intencao.client.whatsapp ?? undefined,
-      clienteEmail:    intencao.client.email ?? undefined,
-      loanId:          loan.id,
-      templateVars:    { intencaoId: String(id), loanId: String(loan.id) },
-    });
+    // Ativar portal e enviar email específico de aceite de contrato (idempotente)
+    try {
+      await this.portalService.notificarAceiteContrato(intencao.clientId, user, loan.id);
+    } catch (err) {
+      this.logger.warn(`Falha ao notificar aceite após aprovação da intenção ${id}: ${String(err)}`);
+    }
 
     return { message: 'Intenção aprovada com sucesso', loanId: loan.id };
   }
@@ -204,6 +194,68 @@ export class IntencaoService {
     });
 
     return { message: 'Intenção rejeitada' };
+  }
+
+  async solicitarInfo(id: number, mensagemTexto: string, userId: number): Promise<unknown> {
+    const intencao = await this.prisma.intencaoEmprestimo.findUnique({
+      where: { id },
+      include: { client: { select: { nome: true } }, consultor: { select: { id: true, nome: true } } },
+    });
+    if (!intencao) throw new NotFoundException(`Intenção ${id} não encontrada`);
+    if (intencao.status !== 'aguardando') {
+      throw new BadRequestException(`Intenção já está com status "${intencao.status}"`);
+    }
+
+    // Criar/reusar conversa direta entre financeiro e consultor, vinculada à intenção
+    const existing = await this.prisma.conversaParticipante.findFirst({
+      where: {
+        userId,
+        conversa: {
+          intencaoId: id,
+          participantes: { some: { userId: intencao.consultorId } },
+        },
+      },
+      select: { conversaId: true },
+    });
+
+    let conversaId: number;
+    if (existing) {
+      conversaId = existing.conversaId;
+    } else {
+      const mim = await this.prisma.user.findUnique({ where: { id: userId }, select: { nome: true } });
+      const conversa = await this.prisma.$transaction(async (tx) => {
+        const c = await tx.conversa.create({
+          data: {
+            tipo:      'direto',
+            titulo:    `Intenção #${id} — ${intencao.client.nome}`,
+            intencaoId: id,
+          },
+        });
+        await tx.conversaParticipante.createMany({
+          data: [
+            { conversaId: c.id, userId,                  role: 'membro' },
+            { conversaId: c.id, userId: intencao.consultorId, role: 'membro' },
+          ],
+        });
+        return c;
+      });
+      conversaId = conversa.id;
+    }
+
+    await this.prisma.mensagem.create({
+      data: {
+        conversaId,
+        remetenteId: userId,
+        conteudo:    mensagemTexto,
+      },
+    });
+
+    await this.prisma.conversa.update({
+      where: { id: conversaId },
+      data:  { updatedAt: new Date() },
+    });
+
+    return { conversaId, message: 'Informações solicitadas ao consultor' };
   }
 
   async registrarFeedback(id: number, dto: FeedbackIntencaoDto, userId: number): Promise<unknown> {

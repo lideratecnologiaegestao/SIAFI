@@ -31,6 +31,7 @@ import { IntencaoModule } from './modules/intencao/intencao.module';
 import { ReparcelamentoModule } from './modules/reparcelamento/reparcelamento.module';
 import { MensagemModule } from './modules/mensagem/mensagem.module';
 import { CobrancaModule } from './modules/cobranca/cobranca.module';
+import { EmailTemplateModule } from './modules/email-template/email-template.module';
 import { SupabaseAuthGuard } from './modules/auth/guards/supabase-auth.guard';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
@@ -63,6 +64,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     ReparcelamentoModule,
     MensagemModule,
     CobrancaModule,
+    EmailTemplateModule,
   ],
   controllers: [AppController],
   providers: [

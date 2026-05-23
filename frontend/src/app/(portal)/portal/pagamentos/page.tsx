@@ -6,7 +6,7 @@ import { ArrowLeft, CheckCircle } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import api from '@/lib/api'
+import { portalClient } from '@/lib/portal/portal-client'
 
 interface Pagamento {
   id: number
@@ -44,7 +44,7 @@ function formatMonthLabel(key: string) {
 export default function PagamentosPage() {
   const { data, isLoading } = useQuery<Pagamento[]>({
     queryKey: ['portal-pagamentos'],
-    queryFn: () => api.get('/portal/pagamentos').then(r => r.data),
+    queryFn: () => portalClient.get('/portal/pagamentos').then(r => r.data),
   })
 
   return (

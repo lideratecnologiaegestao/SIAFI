@@ -9,6 +9,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { IsString, MinLength } from 'class-validator';
+
+class SolicitarInfoDto {
+  @IsString()
+  @MinLength(5)
+  mensagem: string;
+}
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -18,8 +25,9 @@ import { CreateIntencaoDto } from './dto/create-intencao.dto';
 import { AprovarIntencaoDto } from './dto/aprovar-intencao.dto';
 import { RejeitarIntencaoDto } from './dto/rejeitar-intencao.dto';
 import { FeedbackIntencaoDto } from './dto/feedback-intencao.dto';
+import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 
-interface AuthUser { id: number; username: string; role: string }
+type AuthUser = RequestUser;
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('intencoes')
@@ -57,7 +65,7 @@ export class IntencaoController {
     @Body() dto: AprovarIntencaoDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.intencaoService.aprovar(id, dto, user.id);
+    return this.intencaoService.aprovar(id, dto, user);
   }
 
   @Patch(':id/rejeitar')
@@ -68,6 +76,16 @@ export class IntencaoController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.intencaoService.rejeitar(id, dto, user.id);
+  }
+
+  @Patch(':id/solicitar-info')
+  @Roles('admin', 'financeiro')
+  solicitarInfo(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SolicitarInfoDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.intencaoService.solicitarInfo(id, dto.mensagem, user.id);
   }
 
   @Patch(':id/feedback')

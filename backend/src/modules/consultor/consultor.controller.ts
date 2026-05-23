@@ -33,6 +33,12 @@ export class ConsultorController {
     return this.consultorService.getStats(user.id);
   }
 
+  @Get('relatorio')
+  @Roles('consultor')
+  getRelatorio(@CurrentUser() user: RequestUser) {
+    return this.consultorService.getRelatorio(user.id);
+  }
+
   @Get('carteira/:clientId')
   @Roles('consultor')
   getClienteDetalhe(

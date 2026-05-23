@@ -221,6 +221,48 @@ export class ReportsService {
     }));
   }
 
+  async getEvolucao(meses: number): Promise<unknown> {
+    const result: Array<{
+      mes: string; label: string
+      totalRecebido: number; faturamentoBruto: number; recuperacaoCapital: number
+      quantidadeParcelas: number; novosContratos: number
+    }> = []
+    const hoje = new Date()
+
+    for (let i = meses - 1; i >= 0; i--) {
+      const ref   = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
+      const inicio = new Date(ref.getFullYear(), ref.getMonth(), 1, 0, 0, 0, 0)
+      const fim    = new Date(ref.getFullYear(), ref.getMonth() + 1, 0, 23, 59, 59, 999)
+      const mes    = `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`
+      const label  = ref.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })
+        .replace('.', '').replace(/^(.)/, (c) => c.toUpperCase())
+
+      const [parcelas, novosPrestamos] = await Promise.all([
+        this.prisma.installment.findMany({
+          where: { status: 'pago', updatedAt: { gte: inicio, lte: fim } },
+          select: { installmentAmount: true, netGain: true, principalPayback: true },
+        }),
+        this.prisma.loan.count({ where: { createdAt: { gte: inicio, lte: fim } } }),
+      ])
+
+      const totalRecebido    = parcelas.reduce((s, p) => s + Number(p.installmentAmount), 0)
+      const faturamentoBruto = parcelas.reduce((s, p) => s + Number(p.netGain), 0)
+      const recuperacaoCapital = parcelas.reduce((s, p) => s + Number(p.principalPayback), 0)
+
+      result.push({
+        mes,
+        label,
+        totalRecebido:      parseFloat(totalRecebido.toFixed(2)),
+        faturamentoBruto:   parseFloat(faturamentoBruto.toFixed(2)),
+        recuperacaoCapital: parseFloat(recuperacaoCapital.toFixed(2)),
+        quantidadeParcelas: parcelas.length,
+        novosContratos:     novosPrestamos,
+      })
+    }
+
+    return result
+  }
+
   async getContratos(status?: string): Promise<unknown> {
     const where = status
       ? { status: status as 'ativo' | 'quitado' | 'cancelado' | 'inadimplente' }

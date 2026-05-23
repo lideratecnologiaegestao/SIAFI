@@ -9,20 +9,34 @@ import { Loader2 } from 'lucide-react'
 
 // Prefixes that require a minimum role set. First match wins.
 const ROUTE_ROLES: Array<{ prefix: string; roles: UserRole[] }> = [
-  { prefix: '/usuarios', roles: ['admin'] },
-  { prefix: '/configuracoes', roles: ['admin'] },
-  { prefix: '/auditoria', roles: ['admin'] },
-  { prefix: '/emprestimos', roles: ['admin', 'financeiro'] },
-  { prefix: '/relatorios', roles: ['admin', 'financeiro'] },
-  { prefix: '/renegociacoes', roles: ['admin', 'financeiro'] },
-  { prefix: '/pix', roles: ['admin', 'financeiro'] },
-  { prefix: '/conciliacao', roles: ['admin', 'financeiro'] },
-  { prefix: '/inadimplentes', roles: ['admin', 'financeiro'] },
-  { prefix: '/notificacoes', roles: ['admin', 'financeiro'] },
-  { prefix: '/consultor', roles: ['consultor'] },
-  { prefix: '/solicitacoes', roles: ['admin', 'financeiro', 'consultor'] },
-  { prefix: '/intencoes', roles: ['admin', 'financeiro', 'consultor'] },
-  { prefix: '/cobrancas', roles: ['admin', 'financeiro', 'consultor'] },
+  // Admin only
+  { prefix: '/usuarios',        roles: ['admin'] },
+  { prefix: '/configuracoes',   roles: ['admin'] },
+  { prefix: '/auditoria',       roles: ['admin'] },
+  // Admin + Financeiro
+  { prefix: '/emprestimos',     roles: ['admin', 'financeiro'] },
+  { prefix: '/relatorios',      roles: ['admin', 'financeiro'] },
+  { prefix: '/renegociacoes',   roles: ['admin', 'financeiro'] },
+  { prefix: '/conciliacao',     roles: ['admin', 'financeiro'] },
+  { prefix: '/inadimplentes',   roles: ['admin', 'financeiro'] },
+  { prefix: '/notificacoes',    roles: ['admin', 'financeiro'] },
+  // Admin + Financeiro + Consultor
+  { prefix: '/pix',             roles: ['admin', 'financeiro', 'consultor'] },
+  { prefix: '/solicitacoes',    roles: ['admin', 'financeiro', 'consultor'] },
+  { prefix: '/intencoes',       roles: ['admin', 'financeiro', 'consultor'] },
+  { prefix: '/cobrancas',       roles: ['admin', 'financeiro', 'consultor'] },
+  { prefix: '/reparcelamentos', roles: ['admin', 'financeiro', 'consultor'] },
+  { prefix: '/consultor',       roles: ['admin', 'financeiro', 'consultor'] },
+  // Admin + Financeiro + Caixa
+  { prefix: '/caixa',           roles: ['admin', 'financeiro', 'caixa'] },
+  { prefix: '/parcelas',        roles: ['admin', 'financeiro', 'caixa'] },
+  { prefix: '/pagamentos',      roles: ['admin', 'financeiro', 'caixa'] },
+  { prefix: '/suporte',         roles: ['admin', 'financeiro', 'caixa'] },
+  // Admin + Financeiro + Caixa + Consultor
+  { prefix: '/clientes',        roles: ['admin', 'financeiro', 'caixa', 'consultor'] },
+  { prefix: '/mensagens',       roles: ['admin', 'financeiro', 'caixa', 'consultor'] },
+  // Financeiro + Caixa (liberações)
+  { prefix: '/liberacoes-pendentes', roles: ['admin', 'financeiro', 'caixa'] },
 ]
 
 function isAllowed(pathname: string, role: UserRole): boolean {
@@ -62,7 +76,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
-  if (!isAuthenticated) return null
+  if (!isAuthenticated || user?.role === 'cliente') return null
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

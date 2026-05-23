@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Client, Prisma } from '@prisma/client';
 import { extname } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -29,11 +29,16 @@ export class ClientsService {
     private readonly supabase: SupabaseService,
   ) {}
 
-  async findAll(filters: ClientFilterDto): Promise<PaginatedResponse<Client>> {
+  async findAll(filters: ClientFilterDto, consultorId?: number): Promise<PaginatedResponse<Client>> {
     const { page, limit, search, status } = filters;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = {};
+
+    // Consultor só vê sua própria carteira
+    if (consultorId) {
+      where.consultorId = consultorId;
+    }
 
     if (status === 'active') {
       where.active = true;
@@ -65,16 +70,20 @@ export class ClientsService {
     return paginate(data as any, total, page, limit);
   }
 
-  async findById(id: number): Promise<unknown> {
+  async findById(id: number, consultorId?: number): Promise<unknown> {
     const client = await this.prisma.client.findUnique({
       where: { id },
       include: {
         loans: { orderBy: { createdAt: 'asc' } },
         consultor: { select: { id: true, nome: true } },
+        scoreRisco: { select: { scoreGeral: true, classificacao: true, calculadoEm: true } },
       },
     });
     if (!client) {
       throw new NotFoundException(`Cliente com id ${id} não encontrado`);
+    }
+    if (consultorId && client.consultorId !== consultorId) {
+      throw new ForbiddenException('Cliente não pertence à sua carteira');
     }
     return client;
   }
@@ -136,8 +145,14 @@ export class ClientsService {
     return client;
   }
 
-  async update(id: number, dto: UpdateClientDto, files?: UploadedFiles): Promise<Client> {
-    await this.findById(id);
+  async update(id: number, dto: UpdateClientDto, files?: UploadedFiles, consultorId?: number): Promise<Client> {
+    const existing = await this.prisma.client.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException(`Cliente ${id} não encontrado`);
+
+    // Consultor só pode alterar dados cadastrais do próprio cliente
+    if (consultorId && existing.consultorId !== consultorId) {
+      throw new ForbiddenException('Acesso negado: cliente não pertence à sua carteira.');
+    }
 
     const data: Record<string, unknown> = {};
 
@@ -155,8 +170,12 @@ export class ClientsService {
     if (dto.cep !== undefined) data.cep = dto.cep;
     if (dto.observacoes !== undefined) data.observacoes = dto.observacoes;
     if (dto.notificacoesEmail !== undefined) data.notificacoesEmail = dto.notificacoesEmail;
-    if (dto.active !== undefined) data.active = dto.active;
-    if ('consultorId' in dto) data.consultorId = (dto as any).consultorId ?? null;
+
+    // Campos administrativos — apenas admin/financeiro (consultorId presente = consultor bloqueado)
+    if (!consultorId) {
+      if (dto.active !== undefined) data.active = dto.active;
+      if ('consultorId' in dto) data.consultorId = (dto as any).consultorId ?? null;
+    }
 
     if (files && Object.values(files).some((f) => f?.length)) {
       const paths = await this.uploadFiles(id, files);

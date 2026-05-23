@@ -69,6 +69,7 @@ export class ConsultorService {
         tipo: dto.tipo,
         descricao: dto.descricao,
         valorSolicitado: dto.valorSolicitado ?? null,
+        urgencia: (dto as any).urgencia ?? 'normal',
       },
       include: { client: { select: { nome: true } } },
     });
@@ -286,6 +287,96 @@ export class ConsultorService {
         },
       },
     });
+  }
+
+  // ─── Relatório da Carteira ────────────────────────────────────────────────
+
+  async getRelatorio(consultorId: number) {
+    const [loans, overdueInstallments, payments] = await Promise.all([
+      this.prisma.loan.findMany({
+        where: { client: { consultorId }, status: { in: ['ativo', 'inadimplente'] } },
+        select: {
+          id: true,
+          principalAmount: true,
+          totalReceivable: true,
+          status: true,
+          dataInicio: true,
+          installments: {
+            select: { status: true, installmentAmount: true, totalPago: true },
+          },
+        },
+      }),
+      this.prisma.installment.findMany({
+        where: { loan: { client: { consultorId } }, status: 'atrasado' },
+        select: {
+          installmentAmount: true,
+          totalPago: true,
+          dataVencimento: true,
+          loan: { select: { client: { select: { nome: true } } } },
+        },
+        orderBy: { dataVencimento: 'asc' },
+        take: 20,
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          estornado: false,
+          installment: { loan: { client: { consultorId } } },
+        },
+        select: { valorPago: true, dataPagamento: true },
+      }),
+    ]);
+
+    // Resumo da carteira
+    let totalInvestido = 0;
+    let totalAReceber = 0;
+    let totalRecebido = 0;
+    let totalEmAtraso = 0;
+
+    for (const loan of loans) {
+      totalInvestido += Number(loan.principalAmount);
+      for (const inst of loan.installments) {
+        const saldo = Number(inst.installmentAmount) - Number(inst.totalPago);
+        if (inst.status === 'pendente' || inst.status === 'parcialmente_pago') {
+          totalAReceber += saldo;
+        } else if (inst.status === 'atrasado') {
+          totalAReceber += saldo;
+          totalEmAtraso += saldo;
+        }
+      }
+    }
+
+    for (const p of payments) {
+      totalRecebido += Number(p.valorPago);
+    }
+
+    // Faturamento dos últimos 6 meses
+    const now = new Date();
+    const meses: { mes: string; total: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const start = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+      const total = payments
+        .filter(p => {
+          const dt = new Date(p.dataPagamento);
+          return dt >= start && dt <= end;
+        })
+        .reduce((s, p) => s + Number(p.valorPago), 0);
+      meses.push({ mes: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, total });
+    }
+
+    return {
+      resumo: {
+        totalContratos: loans.length,
+        totalInvestido,
+        totalAReceber,
+        totalRecebido,
+        totalEmAtraso,
+        inadimplentes: loans.filter(l => l.status === 'inadimplente').length,
+      },
+      faturamentoMensal: meses,
+      parcelasAtrasadas: overdueInstallments,
+    };
   }
 
   // ─── Helper ───────────────────────────────────────────────────────────────

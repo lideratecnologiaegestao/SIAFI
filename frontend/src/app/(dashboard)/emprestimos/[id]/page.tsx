@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useState } from 'react'
-import { ArrowLeft, XCircle, RefreshCcw, QrCode, DollarSign, FileDown, TrendingUp } from 'lucide-react'
+import { ArrowLeft, XCircle, RefreshCcw, QrCode, DollarSign, FileDown, TrendingUp, Mail } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +53,11 @@ export default function EmprestimoDetalhePage() {
   const cancelMut = useMutation({
     mutationFn: () => api.patch(`/loans/${id}/cancel`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['loans', id] }),
+  })
+
+  const reenviarAceiteMut = useMutation({
+    mutationFn: () => api.patch(`/loans/${id}/reenviar-aceite`),
+    onSuccess: () => alert('Link de aceite reenviado com sucesso!'),
   })
 
   const payMut = useMutation({
@@ -128,6 +133,13 @@ export default function EmprestimoDetalhePage() {
           <Button size="sm" variant="outline" className="gap-1" onClick={baixarContrato}>
             <FileDown className="size-3.5" />PDF
           </Button>
+          {loan.status === 'aguardando_aceite' && (
+            <Button size="sm" variant="outline" className="gap-1"
+              onClick={() => { if (confirm('Reenviar link de aceite para o cliente?')) reenviarAceiteMut.mutate() }}
+              disabled={reenviarAceiteMut.isPending}>
+              <Mail className="size-3.5" />{reenviarAceiteMut.isPending ? 'Enviando...' : 'Reenviar Aceite'}
+            </Button>
+          )}
           {loan.status === 'ativo' && (
             <>
               <Link href={`/renegociacoes/nova?loanId=${loan.id}`}>

@@ -3,6 +3,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BarChart2, RefreshCw, TrendingUp, Users, FileText, FileDown, DollarSign } from 'lucide-react'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend,
+} from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,6 +34,14 @@ export default function RelatoriosPage() {
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0])
   const [statusFilter, setStatusFilter] = useState('')
   const [faturMes, setFaturMes] = useState(today.toISOString().slice(0, 7))
+
+  interface EvolucaoMes { mes: string; label: string; totalRecebido: number; faturamentoBruto: number; novosContratos: number }
+
+  const { data: evolucao } = useQuery<EvolucaoMes[]>({
+    queryKey: ['reports', 'evolucao'],
+    queryFn: () => api.get<EvolucaoMes[]>('/reports/evolucao', { params: { meses: 6 } }).then(r => r.data),
+    staleTime: 5 * 60_000,
+  })
 
   const { data: carteiraData, isLoading: loadingCarteira } = useQuery({
     queryKey: ['reports', 'carteira'],
@@ -149,6 +161,24 @@ export default function RelatoriosPage() {
                   </CardContent>
                 </Card>
               </div>
+              {evolucao && evolucao.length > 0 && (
+                <Card>
+                  <CardHeader><CardTitle className="text-base">Evolução dos últimos 6 meses</CardTitle></CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={evolucao} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(215.4 16.3% 46.9% / 0.2)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={40} />
+                        <Tooltip formatter={(v: any, n: any) => [formatCurrency(Number(v ?? 0)), String(n ?? '')]} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                        <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                        <Bar dataKey="totalRecebido" name="Total Recebido" fill="#16a34a" radius={[3,3,0,0]} maxBarSize={40} />
+                        <Bar dataKey="faturamentoBruto" name="Lucro" fill="#ea580c" radius={[3,3,0,0]} maxBarSize={40} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
             </>
           ) : null}
         </div>

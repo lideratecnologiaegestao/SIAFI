@@ -62,7 +62,10 @@ export class AuthService {
       },
     });
 
-    if (!dbUser) throw new UnauthorizedException('Credenciais inválidas');
+    // Fallback: verificar se é cliente do portal
+    if (!dbUser) {
+      return this.loginAsCliente(identificador, password, res);
+    }
 
     // 2. Verificar bloqueio por tentativas excessivas
     if (dbUser.lockedUntil && dbUser.lockedUntil > new Date()) {
@@ -297,6 +300,53 @@ export class AuthService {
     }
 
     return null;
+  }
+
+  // ─── Login de cliente do portal ──────────────────────────────────────────
+
+  private async loginAsCliente(
+    email: string,
+    password: string,
+    res: Response,
+  ) {
+    const client = await this.prisma.client.findFirst({
+      where: { email, active: true, portalAtivo: true },
+    });
+    if (!client) throw new UnauthorizedException('Credenciais inválidas');
+
+    const { data, error } = await this.supabase.admin.auth.signInWithPassword({ email, password });
+    if (error || !data.session) {
+      throw new UnauthorizedException('Credenciais inválidas');
+    }
+
+    const { access_token, refresh_token } = data.session;
+
+    res.cookie('refresh_token', refresh_token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+    });
+
+    await this.prisma.client.update({
+      where: { id: client.id },
+      data: { ultimoAcessoPortal: new Date() },
+    }).catch(() => {});
+
+    const aal = this.extractAal(access_token);
+    const fatoresVerificados = data.session.user?.factors?.some(
+      (f: { status: string }) => f.status === 'verified',
+    ) ?? false;
+    const needsMfa = fatoresVerificados && aal !== 'aal2';
+    const mfaStatus = await this.verificarPrazoMfa(client.id, 'cliente', 'client');
+
+    return {
+      accessToken: access_token,
+      user: { id: client.id, nome: client.nome, role: 'cliente' },
+      ...(needsMfa ? { needsMfa: true } : {}),
+      ...(mfaStatus ? { mfaStatus } : {}),
+    };
   }
 
   // ─── validateUser (compatibilidade com LocalStrategy / Passport) ─────────

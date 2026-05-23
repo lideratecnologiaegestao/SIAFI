@@ -155,6 +155,14 @@ export class ClientPortalController {
     return this.service.marcarPrimeiroAcessoConcluido(user.id);
   }
 
+  @Patch('perfil/senha')
+  redefinirSenha(
+    @CurrentUser() user: RequestUser,
+    @Body('password') password: string,
+  ) {
+    return this.service.redefinirSenha(user.id, password);
+  }
+
   @Patch('notificacoes')
   updateNotificacoes(
     @CurrentUser() user: RequestUser,

@@ -35,20 +35,54 @@ export class InstallmentsService {
     return installment;
   }
 
-  async findOverdue(): Promise<unknown[]> {
+  async findOverdue(consultorId?: number): Promise<unknown[]> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const where: Record<string, unknown> = {
+      status: { in: ['pendente', 'atrasado'] },
+      dataVencimento: { lt: today },
+    };
+
+    if (consultorId) {
+      where['loan'] = { consultorId };
+    }
+
     return this.prisma.installment.findMany({
-      where: {
-        status: 'pendente',
-        dataVencimento: { lt: today },
-      },
+      where,
       orderBy: { dataVencimento: 'asc' },
       include: {
         loan: {
           include: {
             client: { select: { id: true, nome: true, whatsapp: true } },
+          },
+        },
+      },
+    });
+  }
+
+  // Parcelas com vencimento hoje (pendente/atrasado/parcialmente_pago) — dashboard do caixa.
+  async findHoje(consultorId?: number): Promise<unknown[]> {
+    const hoje = new Date();
+    const inicioDia = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0);
+    const fimDia    = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
+
+    const where: Record<string, unknown> = {
+      status: { in: ['pendente', 'atrasado', 'parcialmente_pago'] },
+      dataVencimento: { gte: inicioDia, lte: fimDia },
+    };
+
+    if (consultorId) {
+      where['loan'] = { consultorId };
+    }
+
+    return this.prisma.installment.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { dataVencimento: 'asc' }],
+      include: {
+        loan: {
+          include: {
+            client: { select: { id: true, nome: true, nomeSocial: true, whatsapp: true } },
           },
         },
       },

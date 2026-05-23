@@ -30,6 +30,15 @@ const OAUTH_ERRORS: Record<string, string> = {
     'Erro ao validar sua conta. Tente novamente ou use e-mail e senha.',
 }
 
+function safeRedirect(r: string | null | undefined): string | null {
+  return r?.startsWith('/') ? r : null
+}
+
+function getRedirectParam(): string | null {
+  if (typeof window === 'undefined') return null
+  return safeRedirect(new URLSearchParams(window.location.search).get('redirect'))
+}
+
 export default function LoginPage() {
   const { login, loginWithGoogle, isAuthenticated, isLoading, user } = useAuth()
   const router = useRouter()
@@ -46,7 +55,8 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.replace(user?.role === 'cliente' ? '/portal' : '/dashboard')
+      const redirect = getRedirectParam()
+      router.replace(user?.role === 'cliente' ? (redirect ?? '/portal') : '/dashboard')
     }
   }, [isAuthenticated, isLoading, user, router])
 
@@ -62,12 +72,15 @@ export default function LoginPage() {
     setServerError(null)
     try {
       const result = await login(data)
+      const redirect = getRedirectParam()
       if (result.needsMfa) {
         router.replace('/mfa-challenge')
       } else if (result.setupMfaRequired) {
         router.replace('/mfa-setup')
+      } else if (result.role === 'cliente') {
+        router.replace(redirect ?? '/portal')
       } else {
-        router.replace(result.role === 'cliente' ? '/portal' : '/dashboard')
+        router.replace('/dashboard')
       }
     } catch {
       setServerError('Usuário ou senha inválidos.')

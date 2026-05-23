@@ -40,9 +40,13 @@ export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
   @Get()
-  @Roles('admin', 'financeiro', 'caixa')
-  findAll(@Query() filters: ClientFilterDto) {
-    return this.clientsService.findAll(filters);
+  @Roles('admin', 'financeiro', 'caixa', 'consultor')
+  findAll(
+    @Query() filters: ClientFilterDto,
+    @CurrentUser() currentUser: RequestUser,
+  ) {
+    const consultorFilter = currentUser.role === 'consultor' ? currentUser.id : undefined;
+    return this.clientsService.findAll(filters, consultorFilter);
   }
 
   @Get('stats')
@@ -70,9 +74,13 @@ export class ClientsController {
   }
 
   @Get(':id')
-  @Roles('admin', 'financeiro', 'caixa')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.clientsService.findById(id);
+  @Roles('admin', 'financeiro', 'caixa', 'consultor')
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() currentUser: RequestUser,
+  ) {
+    const consultorFilter = currentUser.role === 'consultor' ? currentUser.id : undefined;
+    return this.clientsService.findById(id, consultorFilter);
   }
 
   @Post()
@@ -98,14 +106,16 @@ export class ClientsController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'financeiro')
+  @Roles('admin', 'financeiro', 'consultor')
   @UseInterceptors(uploadInterceptor)
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateClientDto,
     @UploadedFiles() files: ClientUploadedFiles,
+    @CurrentUser() currentUser: RequestUser,
   ) {
-    return this.clientsService.update(id, dto, files);
+    const consultorId = currentUser.role === 'consultor' ? currentUser.id : undefined;
+    return this.clientsService.update(id, dto, files, consultorId);
   }
 
   @Delete(':id')

@@ -90,7 +90,7 @@ export class AuthController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     await this.authService.logout(user.supabaseId);
-    res.clearCookie('refresh_token', { httpOnly: true, sameSite: 'lax', path: '/' });
+    res.clearCookie('refresh_token', { httpOnly: true, sameSite: 'lax', path: '/', secure: process.env.NODE_ENV === 'production' });
     return { message: 'Sessão encerrada com sucesso' };
   }
 

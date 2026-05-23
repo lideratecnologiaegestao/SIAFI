@@ -1,51 +1,39 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
+import Image from 'next/image'
 import { Loader2, LogOut, User, Bell } from 'lucide-react'
-import { useAuth } from '@/contexts/auth.context'
+import { PortalAuthProvider, usePortalAuth } from '@/contexts/portal-auth.context'
 import { Button } from '@/components/ui/button'
-import { getSupabaseBrowserClient } from '@/lib/supabase/client'
-import { portalApi } from '@/lib/portal/portal-api'
 import { useRealtimePortal } from '@/hooks/portal/use-realtime-portal'
 
-export default function PortalLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user, logout } = useAuth()
+function PortalLayoutContent({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isLoading, user, logout } = usePortalAuth()
   const router = useRouter()
   const pathname = usePathname()
-
-  const { data: perfil } = useQuery({
-    queryKey: ['portal-perfil-layout'],
-    queryFn: portalApi.getPerfil,
-    enabled: !!user && user.role === 'cliente',
-  })
+  const [loggingOut, setLoggingOut] = useState(false)
 
   const { notificacoes } = useRealtimePortal(user?.id)
   const badgeCount = notificacoes.length
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.replace('/login')
-      return
+      router.replace('/portal/login?redirect=' + encodeURIComponent(pathname))
     }
-    if (!isLoading && user && user.role !== 'cliente') {
-      router.replace('/dashboard')
-    }
-  }, [isAuthenticated, isLoading, user, router])
+  }, [isAuthenticated, isLoading, router, pathname])
 
-  // Redirect to primeiro-acesso page if needed (but not if already there)
   useEffect(() => {
-    if (perfil?.primeiroAcesso && pathname !== '/portal/primeiro-acesso') {
-      router.replace('/portal/primeiro-acesso')
+    if (!isLoading && isAuthenticated && user?.primeiroAcesso && pathname !== '/portal/primeiro-acesso') {
+      router.replace('/portal/primeiro-acesso?redirect=' + encodeURIComponent(pathname))
     }
-  }, [perfil?.primeiroAcesso, pathname, router])
+  }, [isLoading, isAuthenticated, user?.primeiroAcesso, pathname, router])
 
   async function handleLogout() {
+    setLoggingOut(true)
     try { await logout() } catch {}
-    try { await getSupabaseBrowserClient().auth.signOut() } catch {}
-    router.replace('/login')
+    router.replace('/portal/login')
   }
 
   if (isLoading) {
@@ -56,20 +44,17 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
     )
   }
 
-  if (!isAuthenticated || !user || user.role !== 'cliente') return null
+  if (!isAuthenticated || !user) return null
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
-      {/* Header */}
       <header className="bg-white border-b border-border sticky top-0 z-30">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link href="/portal" className="flex flex-col">
             <span className="font-bold text-base tracking-tight text-blue-700 leading-none">SIAFI</span>
-            {perfil && (
-              <span className="text-xs text-muted-foreground leading-none mt-0.5 hidden sm:block">
-                Olá, {perfil.nome.split(' ')[0]}
-              </span>
-            )}
+            <span className="text-xs text-muted-foreground leading-none mt-0.5 hidden sm:block">
+              Olá, {user.nome.split(' ')[0]}
+            </span>
           </Link>
           <div className="flex items-center gap-1">
             {badgeCount > 0 && (
@@ -90,25 +75,32 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
               size="sm"
               className="h-8 w-8 p-0"
               onClick={handleLogout}
+              disabled={loggingOut}
               aria-label="Sair"
             >
-              <LogOut className="size-4" />
+              {loggingOut ? <Loader2 className="size-4 animate-spin" /> : <LogOut className="size-4" />}
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Main */}
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-6">
         {children}
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-border bg-white py-4">
         <p className="text-center text-xs text-muted-foreground">
           SIAFI — Sistema Integrado de Apoio Financeiro · Lidera &copy; {new Date().getFullYear()}
         </p>
       </footer>
     </div>
+  )
+}
+
+export default function PortalLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <PortalAuthProvider>
+      <PortalLayoutContent>{children}</PortalLayoutContent>
+    </PortalAuthProvider>
   )
 }

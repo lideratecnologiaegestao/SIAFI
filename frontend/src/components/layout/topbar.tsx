@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Menu, LogOut, ChevronDown } from 'lucide-react'
 import { useAuth } from '@/contexts/auth.context'
 import { Button } from '@/components/ui/button'
@@ -48,6 +48,7 @@ interface TopbarProps {
 
 export function Topbar({ onMenuToggle }: TopbarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const { user, logout } = useAuth()
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
@@ -97,7 +98,11 @@ export function Topbar({ onMenuToggle }: TopbarProps) {
                 <p className="text-xs text-muted-foreground">{user ? (roleLabel[user.role] ?? user.role) : ''}</p>
               </div>
               <button
-                onClick={() => { setDropdownOpen(false); logout() }}
+                onClick={async () => {
+                  setDropdownOpen(false)
+                  await logout()
+                  router.replace('/login')
+                }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <LogOut className="size-4" />

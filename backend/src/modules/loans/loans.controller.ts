@@ -24,6 +24,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LoansService } from './loans.service';
 import { CreateLoanDto } from './dto/create-loan.dto';
 import { LoanFilterDto } from './dto/loan-filter.dto';
+import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 
 class LiberarCapitalDto {
   @IsEnum(['dinheiro', 'pix', 'ted', 'transferencia'])
@@ -38,11 +39,7 @@ class LiberarCapitalDto {
   observacao?: string;
 }
 
-interface AuthUser {
-  id: number;
-  username: string;
-  role: string;
-}
+type AuthUser = RequestUser;
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('loans')
@@ -51,8 +48,8 @@ export class LoansController {
 
   @Get()
   @Roles('admin', 'financeiro')
-  findAll(@Query() filters: LoanFilterDto) {
-    return this.loansService.findAll(filters);
+  findAll(@Query() filters: LoanFilterDto, @CurrentUser() user: AuthUser) {
+    return this.loansService.findAll(filters, user?.role);
   }
 
   @Get('stats')
@@ -69,8 +66,8 @@ export class LoansController {
 
   @Get(':id')
   @Roles('admin', 'financeiro', 'caixa')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.loansService.findById(id);
+  findOne(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.loansService.findById(id, user?.role);
   }
 
   @Post()
@@ -110,5 +107,14 @@ export class LoansController {
       ip: req.ip,
       userAgent: req.headers['user-agent'],
     });
+  }
+
+  @Patch(':id/reenviar-aceite')
+  @Roles('admin', 'financeiro')
+  reenviarAceite(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.loansService.reenviarAceite(id, user);
   }
 }

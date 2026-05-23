@@ -3,15 +3,18 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SupabaseService } from '../../supabase/supabase.service';
 import { PixService } from '../pix/pix.service';
 
 @Injectable()
 export class ClientPortalService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly supabase: SupabaseService,
     private readonly pixService: PixService,
   ) {}
 
@@ -61,6 +64,7 @@ export class ClientPortalService {
     ]);
 
     const contratosAtivos = loans.filter(l => l.status === 'ativo' || l.status === 'inadimplente');
+    const contratosPendentesAceite = loans.filter(l => l.status === 'aguardando_aceite');
     const todasParcelas = loans.flatMap(l => l.installments);
 
     const parcelasAtrasadas = todasParcelas.filter(p => p.status === 'atrasado');
@@ -102,6 +106,12 @@ export class ClientPortalService {
 
     return {
       contratosAtivos: contratosAtivos.length,
+      contratosPendentesAceite: contratosPendentesAceite.map(l => ({
+        id: l.id,
+        valor: Number(l.principalAmount),
+        numeroParcelas: l.numeroParcelas,
+        aceiteExpiraEm: l.aceiteExpiraEm,
+      })),
       proximaParcela: proxVencimento
         ? {
             valor: Number(proxVencimento.installmentAmount),
@@ -199,6 +209,7 @@ export class ClientPortalService {
       dataInicio: loan.dataInicio,
       status: loan.status,
       metodoPagamento: loan.metodoPagamento,
+      aceiteExpiraEm: loan.aceiteExpiraEm,
       totalParcelado,
       totalPago,
       saldoRestante: totalParcelado - totalPago,
@@ -379,6 +390,23 @@ export class ClientPortalService {
   }
 
   async marcarPrimeiroAcessoConcluido(clientId: number) {
+    await this.prisma.client.update({
+      where: { id: clientId },
+      data: { primeiroAcesso: false, senhaTemporaria: false },
+    });
+    return { sucesso: true };
+  }
+
+  async redefinirSenha(clientId: number, password: string) {
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
+      select: { supabaseId: true },
+    });
+    if (!client?.supabaseId) throw new NotFoundException('Conta não encontrada.');
+
+    const { error } = await this.supabase.admin.auth.admin.updateUserById(client.supabaseId, { password });
+    if (error) throw new InternalServerErrorException(`Erro ao redefinir senha: ${error.message}`);
+
     await this.prisma.client.update({
       where: { id: clientId },
       data: { primeiroAcesso: false, senhaTemporaria: false },

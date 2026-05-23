@@ -6,6 +6,17 @@ export const tokenStore = {
   get: () => _accessToken,
   set: (t: string) => { _accessToken = t },
   clear: () => { _accessToken = null },
+  onAuthLost: null as (() => void) | null,
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const b64 = token.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/')
+    if (!b64) return null
+    return JSON.parse(atob(b64))
+  } catch {
+    return null
+  }
 }
 
 const api = axios.create({
@@ -73,21 +84,27 @@ api.interceptors.response.use(
       originalRequest.headers.Authorization = `Bearer ${data.accessToken}`
       return api(originalRequest)
     } catch (refreshError) {
-      // Fallback: Supabase session from cookies (Google OAuth users)
+      // Fallback: Supabase session from cookies (Google OAuth staff users only)
       try {
         const { getSupabaseBrowserClient } = await import('./supabase/client')
         const supabase = getSupabaseBrowserClient()
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.access_token) {
-          tokenStore.set(session.access_token)
-          processQueue(null, session.access_token)
-          originalRequest.headers.Authorization = `Bearer ${session.access_token}`
-          return api(originalRequest)
+          const payload = decodeJwtPayload(session.access_token)
+          const appRole = (payload?.app_metadata as Record<string, unknown> | undefined)?.role
+          // Reject client sessions — prevents client session from contaminating staff API calls
+          if (appRole !== 'cliente') {
+            tokenStore.set(session.access_token)
+            processQueue(null, session.access_token)
+            originalRequest.headers.Authorization = `Bearer ${session.access_token}`
+            return api(originalRequest)
+          }
         }
       } catch {}
 
       processQueue(refreshError, null)
       tokenStore.clear()
+      tokenStore.onAuthLost?.()
       return Promise.reject(refreshError)
     } finally {
       _isRefreshing = false
