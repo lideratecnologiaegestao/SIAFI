@@ -1,0 +1,95 @@
+/* Portal — Estilos de impressão */
+
+@media print {
+  /* Esconder elementos de navegação */
+  .portal-bottom-nav,
+  .portal-header,
+  .portal-sidebar,
+  [data-no-print],
+  button:not(.print-visible) {
+    display: none !important;
+  }
+
+  /* Reset de fundo */
+  body,
+  .pcard {
+    background: white !important;
+    box-shadow: none !important;
+  }
+
+  /* Cabeçalho de impressão */
+  .print-header {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #0A1628;
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+
+  .print-header-logo {
+    font-size: 18pt;
+    font-weight: 700;
+    color: #0A1628;
+  }
+
+  .print-header-info {
+    font-size: 9pt;
+    color: #52525B;
+    text-align: right;
+  }
+
+  /* Tipografia de impressão */
+  body {
+    font-family: 'DM Sans', Arial, sans-serif;
+    font-size: 11pt;
+    color: #09090B;
+  }
+
+  .font-portal-display,
+  .money-display-lg,
+  .money-display-xl {
+    font-family: 'DM Serif Display', Georgia, serif;
+  }
+
+  /* Tabelas limpas */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 16px;
+  }
+
+  th, td {
+    border: 1px solid #D4D4D8;
+    padding: 6px 10px;
+    text-align: left;
+    font-size: 10pt;
+  }
+
+  th {
+    background: #F4F4F5 !important;
+    font-weight: 600;
+  }
+
+  /* Quebra de página */
+  .page-break-before { page-break-before: always; }
+  .page-break-after  { page-break-after: always; }
+  .no-page-break     { page-break-inside: avoid; }
+
+  /* Rodapé de impressão */
+  .print-footer {
+    display: block !important;
+    border-top: 1px solid #D4D4D8;
+    margin-top: 24px;
+    padding-top: 8px;
+    font-size: 8pt;
+    color: #52525B;
+    text-align: center;
+  }
+}
+
+/* Ocultar cabeçalho de impressão em tela */
+.print-header,
+.print-footer {
+  display: none;
+}

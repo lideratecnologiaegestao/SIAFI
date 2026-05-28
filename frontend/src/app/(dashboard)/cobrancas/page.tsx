@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { formatCurrency, formatDate } from '@/lib/utils'
 
 interface Cobranca {
   id: number
@@ -63,14 +64,6 @@ const resultadoConfig: Record<string, { label: string; variant: 'default' | 'des
   nao_atendeu: { label: 'Não atendeu', variant: 'secondary' },
   numero_incorreto: { label: 'Nº incorreto', variant: 'destructive' },
   outro: { label: 'Outro', variant: 'outline' },
-}
-
-function formatCurrency(v: number) {
-  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-}
-
-function formatDate(s: string) {
-  return new Date(s).toLocaleDateString('pt-BR')
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {

@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
+import { Toaster } from 'sonner'
+import { CookieBanner } from '@/components/lgpd/cookie-banner'
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -14,8 +16,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'SIAFI — Sistema de Agilidade Financeira',
-  description: 'Sistema de Agilidade Financeira — Lidera',
+  title: 'SIAFI — Sistema Integrado de Apoio Financeiro',
+  description: 'Sistema Integrado de Apoio Financeiro',
   icons: {
     icon: '/favicon.png',
     shortcut: '/favicon.png',
@@ -35,6 +37,8 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <Providers>{children}</Providers>
+        <Toaster richColors position="top-right" />
+        <CookieBanner />
       </body>
     </html>
   )

@@ -22,15 +22,18 @@ export class PdfController {
     private readonly excelService: ExcelService,
   ) {}
 
-  // ─── PDF ─────────────────────────────────────────────────────────────────
+  // ─── PDF — Documentos com identidade visual ───────────────────────────────
 
   @Get('contratos/:id/pdf')
-  @Roles('admin', 'financeiro')
+  @Roles('admin', 'financeiro', 'consultor')
   async contratoPdf(
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ) {
-    await this.pdfService.gerarContratoEmprestimo(id, res);
+    const buffer = await this.pdfService.gerarContratoPdf(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="contrato-${id}.pdf"`);
+    res.end(buffer);
   }
 
   @Get('pagamentos/:id/recibo')
@@ -39,10 +42,35 @@ export class PdfController {
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ) {
-    await this.pdfService.gerarReciboPagamento(id, res);
+    const buffer = await this.pdfService.gerarReciboPdf(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="recibo-${id}.pdf"`);
+    res.end(buffer);
   }
 
-  // ─── Excel ───────────────────────────────────────────────────────────────
+  @Get('clientes/:id/extrato')
+  @Roles('admin', 'financeiro', 'consultor')
+  async extratoPdf(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.pdfService.gerarExtratoPdf(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="extrato-cliente-${id}.pdf"`);
+    res.end(buffer);
+  }
+
+  @Get('carteira')
+  @Roles('admin', 'financeiro')
+  async carteiraPdf(@Res() res: Response) {
+    const buffer = await this.pdfService.gerarCarteiraPdf();
+    const data   = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="carteira-${data}.pdf"`);
+    res.end(buffer);
+  }
+
+  // ─── Excel ────────────────────────────────────────────────────────────────
 
   @Get('contratos/excel')
   @Roles('admin', 'financeiro')
@@ -67,5 +95,13 @@ export class PdfController {
   @Roles('admin', 'financeiro')
   async inadimplentesExcel(@Res() res: Response) {
     await this.excelService.exportarInadimplentes(res);
+  }
+
+  // ─── Manual do Sistema (PDFKit legado) ────────────────────────────────────
+
+  @Get('manual-sistema')
+  @Roles('admin')
+  async manualSistemaPdf(@Res() res: Response) {
+    await this.pdfService.gerarManualSistema(res);
   }
 }

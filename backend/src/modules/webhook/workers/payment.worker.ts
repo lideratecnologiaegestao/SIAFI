@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import axios from 'axios';
+import Decimal from 'decimal.js';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   QUEUE_PAYMENT_PROCESSING,
@@ -13,6 +14,8 @@ import {
 } from '../../queue/queue.constants';
 import type { PaymentJobData, NotificationJobData } from '../../queue/queue.interfaces';
 
+Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
+
 interface MpPaymentDetail {
   id: number;
   status: string;
@@ -21,6 +24,9 @@ interface MpPaymentDetail {
   external_reference?: string;
   date_approved?: string;
 }
+
+// Padrão do externalReference enviado ao Mercado Pago
+const EXT_REF_RE = /^SIAFI_INST_(\d+)_LOAN_(\d+)$/;
 
 @Processor(QUEUE_PAYMENT_PROCESSING, { concurrency: 3 })
 export class PaymentWorker extends WorkerHost {
@@ -55,12 +61,9 @@ export class PaymentWorker extends WorkerHost {
     const { paymentId } = job.data;
 
     const mpDetail = await this.fetchMpPayment(paymentId);
+    if (!mpDetail) throw new Error(`Falha ao consultar MP para paymentId=${paymentId}`);
 
-    if (!mpDetail) {
-      throw new Error(`Falha ao consultar MP para paymentId=${paymentId}`);
-    }
-
-    const status = mpDetail.status;
+    const { status } = mpDetail;
 
     if (status === 'pending' || status === 'in_process') {
       this.logger.log(`Pagamento ${paymentId} ainda em processamento (status=${status})`);
@@ -68,9 +71,14 @@ export class PaymentWorker extends WorkerHost {
     }
 
     if (status === 'rejected' || status === 'cancelled') {
+      // Atualizar pix_payment para cancelado se existir
+      await this.prisma.pixPayment.updateMany({
+        where: { paymentId, status: { not: 'pago' } },
+        data:  { status: 'cancelado' },
+      });
       await this.prisma.auditLog.create({
         data: {
-          acao: `PAGAMENTO_MP_${status.toUpperCase()}`,
+          acao:     `PAGAMENTO_MP_${status.toUpperCase()}`,
           entidade: 'payment',
           contexto: { paymentId, status, origem: job.data.origem },
         },
@@ -83,108 +91,182 @@ export class PaymentWorker extends WorkerHost {
       return;
     }
 
-    const pixPayment = await this.prisma.pixPayment.findFirst({ where: { paymentId } });
+    // ── Localizar PixPayment pelo paymentId (lookup primário) ────────────────
+    let pixPayment = await this.prisma.pixPayment.findFirst({
+      where: { paymentId },
+      include: {
+        installment: {
+          include: {
+            loan: {
+              include: {
+                client: { select: { id: true, nome: true, whatsapp: true, email: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // ── Fallback via externalReference (SIAFI_INST_{id}_LOAN_{id}) ──────────
+    if (!pixPayment && mpDetail.external_reference) {
+      const match = mpDetail.external_reference.match(EXT_REF_RE);
+      if (match) {
+        const installmentId = parseInt(match[1], 10);
+        pixPayment = await this.prisma.pixPayment.findFirst({
+          where: {
+            installmentId,
+            status: { not: 'cancelado' },
+          },
+          include: {
+            installment: {
+              include: {
+                loan: {
+                  include: {
+                    client: { select: { id: true, nome: true, whatsapp: true, email: true } },
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (pixPayment) {
+          this.logger.log(
+            `Fallback via externalReference: installmentId=${installmentId}, pixId=${pixPayment.id}`,
+          );
+        }
+      }
+    }
+
     if (!pixPayment) {
       this.logger.warn(`PixPayment não encontrado para paymentId=${paymentId}`);
       return;
     }
 
-    let clientId: number | undefined;
-    let clientNome: string | undefined;
-    let clientWhatsapp: string | undefined;
-    let clientEmail: string | undefined;
+    const inst   = pixPayment.installment;
+    const client = inst.loan.client;
+
+    // Idempotência: checar se já foi processado
+    const jaProcessado = await this.prisma.payment.findFirst({
+      where: {
+        installmentId:   inst.id,
+        metodoPagamento: 'pix',
+        observacao:      { contains: paymentId },
+      },
+    });
+
+    if (jaProcessado) {
+      this.logger.log(`Pagamento MP #${paymentId} já processado (payment.id=${jaProcessado.id}) — ignorando`);
+      return;
+    }
+
+    if (inst.status === 'pago') {
+      this.logger.log(`Installment #${inst.id} já está paga — apenas atualizando pix_payment`);
+      await this.prisma.pixPayment.update({
+        where: { id: pixPayment.id },
+        data:  { status: 'pago', paymentId },
+      });
+      return;
+    }
+
+    const valorPago    = mpDetail.transaction_amount;
+    const valorDecimal = new Decimal(valorPago.toString());
+    const novoTotal    = new Decimal(inst.totalPago.toString()).plus(valorDecimal);
+    const valorInst    = new Decimal(inst.installmentAmount.toString());
+    const novoStatus   = novoTotal.gte(valorInst) ? 'pago' : inst.status;
 
     await this.prisma.$transaction(async (tx) => {
+      // 1. Atualizar pix_payment → pago
       await tx.pixPayment.update({
-        where: { id: pixPayment.id },
-        data: { status: 'pago', updatedAt: new Date() },
+        where: { id: pixPayment!.id },
+        data:  { status: 'pago', paymentId, updatedAt: new Date() },
       });
 
-      const installment = await tx.installment.findUnique({
-        where: { id: pixPayment.installmentId },
-        include: {
-          loan: { include: { client: { select: { id: true, nome: true, whatsapp: true, email: true } } } },
+      // 2. Cancelar outros pix_payments pendentes da mesma parcela
+      await tx.pixPayment.updateMany({
+        where: {
+          installmentId: inst.id,
+          id:            { not: pixPayment!.id },
+          status:        'pendente',
         },
+        data: { status: 'cancelado' },
       });
 
-      if (!installment || installment.status === 'pago') return;
-
-      const valorPago = mpDetail.transaction_amount;
-      const novoTotalPago = Number(installment.totalPago) + valorPago;
-      const novoStatus = novoTotalPago >= Number(installment.installmentAmount) ? 'pago' : installment.status;
-
+      // 3. Criar registro em payments
       await tx.payment.create({
         data: {
-          installmentId: installment.id,
-          valorPago,
-          dataPagamento: mpDetail.date_approved ? new Date(mpDetail.date_approved) : new Date(),
+          installmentId:   inst.id,
+          valorPago:       valorDecimal.toDecimalPlaces(2).toNumber(),
+          dataPagamento:   mpDetail.date_approved ? new Date(mpDetail.date_approved) : new Date(),
           metodoPagamento: 'pix',
-          observacao: `PIX via Mercado Pago — ID ${paymentId}`,
+          observacao:      `PIX via Mercado Pago — ID ${paymentId}`,
         },
       });
 
+      // 4. Atualizar installment
       await tx.installment.update({
-        where: { id: installment.id },
-        data: { totalPago: novoTotalPago, status: novoStatus },
+        where: { id: inst.id },
+        data:  { totalPago: novoTotal.toDecimalPlaces(2).toNumber(), status: novoStatus },
       });
 
+      // 5. Transaction de entrada no caixa
+      await tx.transaction.create({
+        data: {
+          tipo:      'entrada',
+          valor:     valorDecimal.toDecimalPlaces(2).toNumber(),
+          descricao: `PIX MP - Parcela #${inst.numero} - ${client.nome}`,
+          categoria: 'Pagamento PIX',
+          data:      mpDetail.date_approved ? new Date(mpDetail.date_approved) : new Date(),
+        },
+      });
+
+      // 6. Quitar loan se todas as parcelas estão pagas
       if (novoStatus === 'pago') {
         const unpaid = await tx.installment.count({
           where: {
-            loanId: installment.loanId,
-            status: { not: 'pago' },
-            id: { not: installment.id },
+            loanId: inst.loanId,
+            status: { notIn: ['pago', 'cancelado'] },
+            id:     { not: inst.id },
           },
         });
         if (unpaid === 0) {
-          await tx.loan.update({ where: { id: installment.loanId }, data: { status: 'quitado' } });
+          await tx.loan.update({ where: { id: inst.loanId }, data: { status: 'quitado' } });
+          this.logger.log(`Loan #${inst.loanId} marcado como quitado`);
         }
       }
 
-      const client = installment.loan.client;
-      clientId = client.id;
-      clientNome = client.nome;
-      clientWhatsapp = client.whatsapp ?? undefined;
-      clientEmail = client.email ?? undefined;
-
-      await tx.transaction.create({
-        data: {
-          tipo: 'entrada',
-          valor: valorPago,
-          descricao: `PIX MP - Parcela #${installment.numero} - ${client.nome}`,
-          categoria: 'Pagamento PIX',
-          data: mpDetail.date_approved ? new Date(mpDetail.date_approved) : new Date(),
-        },
-      });
-
+      // 7. AuditLog
       await tx.auditLog.create({
         data: {
-          acao: 'PAGAMENTO_MP_APROVADO',
+          acao:     'PAGAMENTO_MP_APROVADO',
           entidade: 'payment',
-          contexto: { paymentId, valorPago, installmentId: installment.id, novoStatus },
+          contexto: { paymentId, valorPago, installmentId: inst.id, novoStatus },
         },
       });
     });
 
-    if (clientId && clientNome) {
-      const notifData: NotificationJobData = {
-        clientId,
-        clienteNome: clientNome,
-        clienteWhatsapp: clientWhatsapp,
-        clienteEmail: clientEmail,
-        valorParcela: mpDetail.transaction_amount,
-      };
+    this.logger.log(
+      `✅ Webhook processado — Parcela #${inst.id} · Loan #${inst.loanId} · R$ ${valorPago} · MP #${paymentId}`,
+    );
 
-      if (clientWhatsapp) {
-        await this.notificationsQueue.add(JOB_WA_CONFIRMACAO_PAGAMENTO, notifData, {
-          jobId: `confirmacao-wa-${paymentId}`,
-        });
-      }
-      if (clientEmail) {
-        await this.notificationsQueue.add(JOB_EMAIL_CONFIRMACAO, notifData, {
-          jobId: `confirmacao-email-${paymentId}`,
-        });
-      }
+    // Notificações (fire-and-forget)
+    const notifData: NotificationJobData = {
+      clientId:        client.id,
+      clienteNome:     client.nome,
+      clienteWhatsapp: client.whatsapp ?? undefined,
+      clienteEmail:    client.email ?? undefined,
+      valorParcela:    valorPago,
+    };
+
+    if (client.whatsapp) {
+      await this.notificationsQueue.add(JOB_WA_CONFIRMACAO_PAGAMENTO, notifData, {
+        jobId: `confirmacao-wa-${paymentId}`,
+      }).catch(() => {});
+    }
+    if (client.email) {
+      await this.notificationsQueue.add(JOB_EMAIL_CONFIRMACAO, notifData, {
+        jobId: `confirmacao-email-${paymentId}`,
+      }).catch(() => {});
     }
   }
 
@@ -207,11 +289,11 @@ export class PaymentWorker extends WorkerHost {
         await this.paymentQueue.add(
           JOB_PAYMENT_WEBHOOK,
           {
-            paymentId: pix.paymentId,
+            paymentId:         pix.paymentId,
             externalReference: pix.paymentId,
-            status: mpDetail.status,
-            amount: mpDetail.transaction_amount,
-            origem: 'cron',
+            status:            mpDetail.status,
+            amount:            mpDetail.transaction_amount,
+            origem:            'cron',
           },
           { jobId: `conciliacao-${pix.paymentId}` },
         );
@@ -222,7 +304,7 @@ export class PaymentWorker extends WorkerHost {
 
     await this.prisma.auditLog.create({
       data: {
-        acao: 'CONCILIACAO_PIX_EXECUTADA',
+        acao:     'CONCILIACAO_PIX_EXECUTADA',
         entidade: 'queue',
         contexto: { jobId: job.id, total: pendentes.length },
       },
@@ -249,13 +331,13 @@ export class PaymentWorker extends WorkerHost {
 
     await this.prisma.auditLog.create({
       data: {
-        acao: `${job.name.toUpperCase().replace(/\./g, '_')}_FALHOU`,
+        acao:     `${job.name.toUpperCase().replace(/\./g, '_')}_FALHOU`,
         entidade: 'queue',
         contexto: {
-          jobId: job.id,
-          jobName: job.name,
-          erro: error.message,
-          paymentId: job.data.paymentId,
+          jobId:      job.id,
+          jobName:    job.name,
+          erro:       error.message,
+          paymentId:  job.data.paymentId,
           tentativas: job.attemptsMade,
         },
       },

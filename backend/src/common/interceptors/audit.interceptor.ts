@@ -8,6 +8,7 @@ import type { Request } from 'express';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { AuditService } from '../../modules/audit/audit.service';
+import { sanitizarDadosAudit } from '../../modules/lgpd/lgpd.service';
 
 // Roles que geram trilha de auditoria automática em toda escrita
 const AUDITED_ROLES = new Set(['admin', 'financeiro', 'caixa']);
@@ -28,6 +29,12 @@ export class AuditInterceptor implements NestInterceptor {
 
     const acao = `${method} ${url}`;
 
+    const rawBody = (req as any).body;
+    const dados =
+      rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)
+        ? sanitizarDadosAudit(rawBody as Record<string, unknown>)
+        : undefined;
+
     return next.handle().pipe(
       tap({
         next: () => {
@@ -38,6 +45,7 @@ export class AuditInterceptor implements NestInterceptor {
               acao,
               ip,
               userAgent: headers['user-agent'] as string | undefined,
+              dados,
             })
             .catch(() => undefined);
         },

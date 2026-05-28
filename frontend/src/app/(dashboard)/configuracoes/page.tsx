@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Save, RefreshCw, Settings } from 'lucide-react'
+import { Save, RefreshCw, Settings, Building2, ChevronRight } from 'lucide-react'
+import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -135,6 +136,23 @@ export default function ConfiguracoesPage() {
           Configurações salvas com sucesso!
         </div>
       )}
+
+      <Link href="/configuracoes/empresa">
+        <Card className="hover:bg-muted/30 transition-colors cursor-pointer">
+          <CardContent className="flex items-center justify-between py-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Building2 className="size-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Empresa / Identidade Visual</p>
+                <p className="text-xs text-muted-foreground">Logo, cores, CNPJ, endereço e documentos PDF</p>
+              </div>
+            </div>
+            <ChevronRight className="size-4 text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </Link>
 
       {mutation.isError && (
         <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">

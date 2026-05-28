@@ -121,6 +121,7 @@ model User {
   mensagensEnviadas          Mensagem[]                  @relation("MensagemRemetente")
   conversasParticipadas      ConversaParticipante[]      @relation("ParticipaConversa")
   solicitacoesReparcela      SolicitacaoReparcelamento[] @relation("ConsultorReparcelamento")
+  solicitacoesRespondidas    SolicitacaoTitular[]
 
   @@map("users")
 }
@@ -168,6 +169,12 @@ model Client {
   mfaDecidedAt         DateTime?       @map("mfa_decided_at")
   consultorId          Int?            @map("consultor_id")
   consultor            User?           @relation("ClienteConsultor", fields: [consultorId], references: [id])
+
+  // LGPD — aceite de documentos
+  termosAceitosEm     DateTime?       @map("termos_aceitos_em")
+  termosVersao        String?         @db.VarChar(20) @map("termos_versao")
+  politicaAceitaEm    DateTime?       @map("politica_aceita_em")
+
   createdAt            DateTime        @default(now())   @map("created_at")
   updatedAt            DateTime        @updatedAt        @map("updated_at")
 
@@ -184,6 +191,8 @@ model Client {
   cobrancaContatos           CobrancaContato[]
   solicitacoesReparcelamento SolicitacaoReparcelamento[]
   scoreRisco                 ScoreRisco?
+  consentimentos             ConsentimentoLGPD[]
+  solicitacoesTitular        SolicitacaoTitular[]
 
   @@index([nome])
   @@index([riskLevel])
@@ -795,4 +804,51 @@ model EmailTemplate {
   updatedAt   DateTime @updatedAt      @map("updated_at")
 
   @@map("email_templates")
+}
+
+// ─── LGPD — Conformidade ──────────────────────────────────────────────────────
+
+model ConsentimentoLGPD {
+  id        Int      @id @default(autoincrement())
+  clientId  Int      @map("client_id")
+  tipo      String   @db.VarChar(50)
+  // 'termos_uso' | 'politica_privacidade' | 'cookies_analiticos'
+  // | 'marketing_whatsapp' | 'marketing_email'
+  versao    String   @db.VarChar(20)
+  aceito    Boolean
+  ip        String?  @db.VarChar(45) @map("ip_address")
+  userAgent String?  @db.Text        @map("user_agent")
+  hash      String?  @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId, tipo])
+  @@map("consentimentos_lgpd")
+}
+
+model SolicitacaoTitular {
+  id              Int       @id @default(autoincrement())
+  clientId        Int?      @map("client_id")
+  nomeRequerente  String    @db.VarChar(200) @map("nome_requerente")
+  emailRequerente String    @db.VarChar(200) @map("email_requerente")
+  cpfRequerente   String?   @db.VarChar(14)  @map("cpf_requerente")
+  tipo            String    @db.VarChar(50)
+  // 'acesso' | 'retificacao' | 'exclusao' | 'portabilidade'
+  // | 'oposicao' | 'revogacao_consentimento' | 'informacao'
+  descricao       String    @db.Text
+  status          String    @default("aberto") @db.VarChar(20)
+  resposta        String?   @db.Text
+  respondidoEm    DateTime? @map("respondido_em")
+  respondidoPor   Int?      @map("respondido_por")
+  ip              String?   @db.VarChar(45) @map("ip_address")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt      @map("updated_at")
+
+  client      Client? @relation(fields: [clientId], references: [id])
+  respondente User?   @relation(fields: [respondidoPor], references: [id])
+
+  @@index([status])
+  @@index([clientId])
+  @@map("solicitacoes_titular")
 }

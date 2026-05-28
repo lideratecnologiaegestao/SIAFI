@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Pencil, Phone, Mail, MapPin, FileText, CreditCard, FolderOpen, ExternalLink, UserCheck, X } from 'lucide-react'
+import { ArrowLeft, Pencil, Phone, Mail, MapPin, FileText, FileDown, CreditCard, FolderOpen, ExternalLink, UserCheck, X, Plus } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { formatCPF, formatPhone, formatDate, formatCEP, formatCurrency, STATUS_LOAN } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth.context'
+import { toast } from 'sonner'
 import api from '@/lib/api'
 import { PortalCard } from '@/components/portal/portal-card'
 
@@ -28,13 +29,22 @@ interface Client {
   active: boolean; observacoes: string; createdAt: string
   fotoPath?: string; rgPath?: string; comprovantePath?: string
   consultor?: { id: number; nome: string } | null
-  loans: Array<{ id: number; valor: number; numeroParcelas: number; status: string; dataInicio: string }>
+  loans: Array<{ id: number; principalAmount: string; totalReceivable: string; numeroParcelas: number; status: string; dataInicio: string }>
 }
 
 interface DocumentUrls {
   fotoUrl?: string
   rgUrl?: string
   comprovanteUrl?: string
+}
+
+async function baixarPdf(endpoint: string, filename: string) {
+  const res = await api.get(endpoint, { responseType: 'blob' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([res.data as BlobPart], { type: 'application/pdf' }))
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
 }
 
 export default function ClienteDetalhePage() {
@@ -64,7 +74,9 @@ export default function ClienteDetalhePage() {
       qc.invalidateQueries({ queryKey: ['clients', id] })
       setShowVincular(false)
       setSelectedConsultorId('')
+      toast.success('Consultor atualizado com sucesso')
     },
+    onError: () => toast.error('Não foi possível vincular o consultor. Tente novamente.'),
   })
 
   const hasDocuments = !!(client?.fotoPath || client?.rgPath || client?.comprovantePath)
@@ -116,7 +128,12 @@ export default function ClienteDetalhePage() {
         <Card>
           <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileText className="size-4" />Dados Pessoais</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">CPF</span><span className="font-medium">{formatCPF(client.cpf)}</span></div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">CPF</span>
+              <span className="font-medium">
+                {client.cpf ? formatCPF(client.cpf) : <span className="italic text-muted-foreground">Não informado</span>}
+              </span>
+            </div>
             {client.rg && <div className="flex justify-between"><span className="text-muted-foreground">RG</span><span className="font-medium">{client.rg}</span></div>}
             {client.dataNascimento && <div className="flex justify-between"><span className="text-muted-foreground">Nascimento</span><span className="font-medium">{formatDate(client.dataNascimento)}</span></div>}
           </CardContent>
@@ -267,18 +284,24 @@ export default function ClienteDetalhePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2"><CreditCard className="size-4" />Empréstimos de {client.nome}</CardTitle>
-            {canManage && (
-              <Link href={`/emprestimos/novo?clienteId=${client.id}`}>
-                <Button size="sm" variant="outline">Novo empréstimo</Button>
-              </Link>
-            )}
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="gap-1.5"
+                onClick={() => baixarPdf(`/export/clientes/${client.id}/extrato`, `extrato-${client.id}.pdf`)}>
+                <FileDown className="size-3.5" />Extrato PDF
+              </Button>
+              {canManage && (
+                <Link href={`/emprestimos/novo?clienteId=${client.id}`}>
+                  <Button size="sm" variant="outline">Novo empréstimo</Button>
+                </Link>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
                   <th className="text-left px-4 py-2 font-medium text-muted-foreground">Contrato</th>
-                  <th className="text-right px-4 py-2 font-medium text-muted-foreground">Valor</th>
+                  <th className="text-right px-4 py-2 font-medium text-muted-foreground">Capital</th>
                   <th className="text-center px-4 py-2 font-medium text-muted-foreground">Parcelas</th>
                   <th className="text-left px-4 py-2 font-medium text-muted-foreground">Início</th>
                   <th className="text-center px-4 py-2 font-medium text-muted-foreground">Status</th>
@@ -296,14 +319,22 @@ export default function ClienteDetalhePage() {
                           <p className="text-xs text-muted-foreground">Empréstimo #{loan.id}</p>
                         </div>
                       </td>
-                      <td className="px-4 py-2 text-right font-medium">{formatCurrency(loan.valor)}</td>
+                      <td className="px-4 py-2 text-right font-medium">{formatCurrency(loan.principalAmount)}</td>
                       <td className="px-4 py-2 text-center text-muted-foreground">{loan.numeroParcelas}x</td>
                       <td className="px-4 py-2 text-muted-foreground">{formatDate(loan.dataInicio)}</td>
                       <td className="px-4 py-2 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
                       <td className="px-4 py-2 text-right">
-                        <Link href={`/emprestimos/${loan.id}`}>
-                          <Button variant="ghost" size="sm">Ver</Button>
-                        </Link>
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => baixarPdf(`/export/contratos/${loan.id}/pdf`, `contrato-${loan.id}.pdf`)}
+                            className="inline-flex items-center gap-1 rounded-md px-2 h-7 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                          >
+                            <FileText className="size-3" />PDF
+                          </button>
+                          <Link href={`/emprestimos/${loan.id}`}>
+                            <Button variant="ghost" size="sm">Ver</Button>
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   )

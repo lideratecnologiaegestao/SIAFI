@@ -1,6 +1,7 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -32,12 +33,15 @@ import { ReparcelamentoModule } from './modules/reparcelamento/reparcelamento.mo
 import { MensagemModule } from './modules/mensagem/mensagem.module';
 import { CobrancaModule } from './modules/cobranca/cobranca.module';
 import { EmailTemplateModule } from './modules/email-template/email-template.module';
+import { LgpdModule } from './modules/lgpd/lgpd.module';
+import { EmpresaModule } from './modules/empresa/empresa.module';
 import { SupabaseAuthGuard } from './modules/auth/guards/supabase-auth.guard';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     PrismaModule,
     SupabaseModule,
     QueueModule,
@@ -65,6 +69,8 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     MensagemModule,
     CobrancaModule,
     EmailTemplateModule,
+    LgpdModule,
+    EmpresaModule,
   ],
   controllers: [AppController],
   providers: [
@@ -72,6 +78,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     SupabaseAuthGuard,
     JwtAuthGuard,
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule implements NestModule {

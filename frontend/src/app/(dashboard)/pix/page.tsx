@@ -9,6 +9,7 @@ import { useSearchParams } from 'next/navigation'
 import {
   QrCode, RefreshCw, Copy, Check, ExternalLink, Send,
   AlertTriangle, Clock, CircleCheck, XCircle, ChevronDown,
+  CheckCircle2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import api from '@/lib/api'
+import { useAuth } from '@/contexts/auth.context'
 
 const schema = z.object({ installmentId: z.coerce.number().min(1) })
 type FormData = z.infer<typeof schema>
@@ -35,6 +37,7 @@ interface Charge {
   status: string
   expiresAt: string | null
   createdAt: string
+  installment?: { id: number; status: string; totalPago: number }
 }
 
 function ChargeStatusBadge({ status, expiresAt }: { status: string; expiresAt: string | null }) {
@@ -52,8 +55,8 @@ function ExpiresIn({ expiresAt }: { expiresAt: string | null }) {
   const now = new Date()
   if (exp < now) return <p className="text-xs text-orange-600">Expirou em {formatDateTime(expiresAt)}</p>
   const diffMs = exp.getTime() - now.getTime()
-  const diffH = Math.floor(diffMs / 3_600_000)
-  const diffM = Math.floor((diffMs % 3_600_000) / 60_000)
+  const diffH  = Math.floor(diffMs / 3_600_000)
+  const diffM  = Math.floor((diffMs % 3_600_000) / 60_000)
   return (
     <p className="text-xs text-muted-foreground">
       Válido até {formatDateTime(expiresAt)}
@@ -63,28 +66,31 @@ function ExpiresIn({ expiresAt }: { expiresAt: string | null }) {
 }
 
 export default function PixPage() {
-  const qc = useQueryClient()
+  const qc         = useQueryClient()
   const searchParams = useSearchParams()
   const preParcelaId = searchParams.get('parcelaId')
+  const { user }   = useAuth()
+  const isAdminOrFinanceiro = ['admin', 'financeiro'].includes(user?.role ?? '')
 
-  const [copiedId, setCopiedId] = useState<number | null>(null)
-  const [clienteId, setClienteId] = useState('')
-  const [loanId, setLoanId] = useState('')
-  const [tipoGerar, setTipoGerar] = useState<'pix' | 'boleto'>('pix')
-  const [expHours, setExpHours] = useState(24)
-  const [expDays, setExpDays] = useState(3)
+  const [copiedId, setCopiedId]       = useState<number | null>(null)
+  const [clienteId, setClienteId]     = useState('')
+  const [loanId, setLoanId]           = useState('')
+  const [tipoGerar, setTipoGerar]     = useState<'pix' | 'boleto'>('pix')
+  const [expHours, setExpHours]       = useState(24)
+  const [expDays, setExpDays]         = useState(3)
   const [showHistory, setShowHistory] = useState(false)
+  const [pagamentoConfirmado, setPagamentoConfirmado] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const { data: clients } = useQuery({
     queryKey: ['clients-list'],
-    queryFn: () => api.get<any>('/clients', { params: { limit: 500, status: 'active' } }).then(r => r.data.data ?? r.data),
+    queryFn:  () => api.get<any>('/clients', { params: { limit: 500, status: 'active' } }).then(r => r.data.data ?? r.data),
   })
 
   const { data: loans } = useQuery({
     queryKey: ['loans-by-client-pix', clienteId],
-    queryFn: () => api.get<any>('/loans', { params: { clientId: clienteId, status: 'ativo', limit: 50 } }).then(r => r.data.data ?? r.data),
-    enabled: !!clienteId,
+    queryFn:  () => api.get<any>('/loans', { params: { clientId: clienteId, status: 'ativo', limit: 50 } }).then(r => r.data.data ?? r.data),
+    enabled:  !!clienteId,
   })
 
   const { data: installments } = useQuery({
@@ -105,26 +111,38 @@ export default function PixPage() {
 
   const { data: charges, isLoading: loadingCharges, refetch: refetchCharges } = useQuery({
     queryKey: ['pix-charges', installmentId],
-    queryFn: () => api.get<Charge[]>(`/pix/installment/${installmentId}`).then(r => r.data),
-    enabled: !!installmentId && installmentId > 0,
+    queryFn:  () => api.get<Charge[]>(`/pix/installment/${installmentId}`).then(r => r.data),
+    enabled:  !!installmentId && installmentId > 0,
   })
 
-  const latestActive = charges?.find(c => c.status === 'pendente' && (!c.expiresAt || new Date(c.expiresAt) > new Date()))
+  const latestActive = charges?.find(
+    c => c.status === 'pendente' && (!c.expiresAt || new Date(c.expiresAt) > new Date())
+  )
   const latestCharge = charges?.[0]
 
-  // Poll MP status every 5s while there's an active pending PIX
+  // Polling a cada 5s enquanto há PIX pendente ativo
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current)
+    setPagamentoConfirmado(false)
+
     if (latestActive?.tipo === 'pix' && latestActive.status === 'pendente') {
       pollRef.current = setInterval(async () => {
         try {
-          const { data } = await api.get(`/pix/${latestActive.id}/status`)
-          if (data.status === 'pago' || data.mpStatus === 'approved') {
+          const { data } = await api.get<Charge>(`/pix/${latestActive.id}/status`)
+          if (data.status === 'pago' || (data as any).mpStatus === 'approved') {
+            clearInterval(pollRef.current!)
+            pollRef.current = null
+            setPagamentoConfirmado(true)
             refetchCharges()
-            if (pollRef.current) clearInterval(pollRef.current)
+            // Invalidar queries relacionadas para manter consistência
+            qc.invalidateQueries({ queryKey: ['installments-by-loan-pix', loanId] })
+            qc.invalidateQueries({ queryKey: ['loan', loanId] })
+            qc.invalidateQueries({ queryKey: ['loans-by-client-pix', clienteId] })
+            qc.invalidateQueries({ queryKey: ['pagamentos'] })
+            qc.invalidateQueries({ queryKey: ['payments'] })
           }
         } catch { /* ignore */ }
-      }, 6_000)
+      }, 5_000)
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [latestActive?.id, latestActive?.status])
@@ -133,16 +151,19 @@ export default function PixPage() {
     mutationFn: (data: FormData) =>
       api.post('/pix/generate', {
         installmentId: data.installmentId,
-        tipo: tipoGerar,
-        expirationHours: tipoGerar === 'pix' ? expHours : undefined,
-        expirationDays: tipoGerar === 'boleto' ? expDays : undefined,
+        tipo:          tipoGerar,
+        expirationHours: tipoGerar === 'pix'    ? expHours : undefined,
+        expirationDays:  tipoGerar === 'boleto' ? expDays  : undefined,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pix-charges', installmentId] }),
+    onSuccess: () => {
+      setPagamentoConfirmado(false)
+      qc.invalidateQueries({ queryKey: ['pix-charges', installmentId] })
+    },
   })
 
   const reissueMut = useMutation({
     mutationFn: (chargeId: number) => api.post(`/pix/${chargeId}/reissue`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pix-charges', installmentId] }),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['pix-charges', installmentId] }),
   })
 
   function copyText(text: string, id: number) {
@@ -164,10 +185,12 @@ export default function PixPage() {
     window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`, '_blank')
   }
 
-  const selectedInst = (installments as any[])?.find((i: any) => i.id === Number(installmentId))
+  const selectedInst   = (installments as any[])?.find((i: any) => i.id === Number(installmentId))
   const selectedClient = (clients as any[])?.find((c: any) => c.id === Number(clienteId))
-  const selectedLoan = (loans as any[])?.find((l: any) => l.id === Number(loanId))
-  const isOverdue = selectedInst && new Date(selectedInst.dataVencimento) < new Date()
+  const isOverdue      = selectedInst && new Date(selectedInst.dataVencimento) < new Date()
+
+  // Verificar se há QR Code ativo (não expirado) para a parcela selecionada
+  const temQrAtivo = !!latestActive
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -188,7 +211,7 @@ export default function PixPage() {
             <>
               <div className="space-y-1.5">
                 <Label>Cliente</Label>
-                <Select value={clienteId} onChange={e => { setClienteId(e.target.value); setLoanId(''); setValue('installmentId', 0) }}>
+                <Select value={clienteId} onChange={e => { setClienteId(e.target.value); setLoanId(''); setValue('installmentId', 0); setPagamentoConfirmado(false) }}>
                   <option value="">Selecione o cliente...</option>
                   {(clients ?? []).map((c: any) => (
                     <option key={c.id} value={c.id}>{c.nome}</option>
@@ -199,7 +222,7 @@ export default function PixPage() {
               {clienteId && (
                 <div className="space-y-1.5">
                   <Label>Empréstimo ativo</Label>
-                  <Select value={loanId} onChange={e => { setLoanId(e.target.value); setValue('installmentId', 0) }}>
+                  <Select value={loanId} onChange={e => { setLoanId(e.target.value); setValue('installmentId', 0); setPagamentoConfirmado(false) }}>
                     <option value="">Selecione o empréstimo...</option>
                     {((loans ?? []) as any[]).map((l: any) => (
                       <option key={l.id} value={l.id}>#{l.id} — {formatCurrency(l.valor)} — {l.numeroParcelas}x</option>
@@ -211,10 +234,10 @@ export default function PixPage() {
               {loanId && (
                 <div className="space-y-1.5">
                   <Label>Parcela</Label>
-                  <Select {...register('installmentId', { valueAsNumber: true })}>
+                  <Select {...register('installmentId', { valueAsNumber: true })} onChange={e => { setValue('installmentId', Number(e.target.value)); setPagamentoConfirmado(false) }}>
                     <option value="">Selecione a parcela...</option>
                     {((installments ?? []) as any[]).map((i: any) => {
-                      const saldo = Number(i.valor) - Number(i.totalPago)
+                      const saldo    = Number(i.installmentAmount ?? i.valor) - Number(i.totalPago)
                       const atrasada = new Date(i.dataVencimento) < new Date()
                       return (
                         <option key={i.id} value={i.id}>
@@ -233,22 +256,67 @@ export default function PixPage() {
             <div className={`rounded-lg px-4 py-3 text-sm ${isOverdue ? 'bg-orange-50 border border-orange-200' : 'bg-muted/50'}`}>
               <p className="font-medium">
                 {isOverdue && <AlertTriangle className="size-4 inline mr-1 text-orange-600" />}
-                Parcela #{selectedInst.numero} — {formatCurrency(Number(selectedInst.valor) - Number(selectedInst.totalPago))}
+                Parcela #{selectedInst.numero} — {formatCurrency(Number(selectedInst.installmentAmount ?? selectedInst.valor) - Number(selectedInst.totalPago))}
               </p>
               <p className="text-muted-foreground text-xs">
                 Vencimento: {formatDate(selectedInst.dataVencimento)}
                 {isOverdue && ` • ${Math.floor((Date.now() - new Date(selectedInst.dataVencimento).getTime()) / 86_400_000)} dias em atraso`}
               </p>
+              {isOverdue && !isAdminOrFinanceiro && (
+                <p className="text-orange-600 text-xs mt-1 font-medium">
+                  Parcela vencida. Apenas financeiro ou admin pode gerar novo QR Code.
+                </p>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Gerar cobrança */}
-      {installmentId > 0 && (
+      {/* Confirmação de pagamento */}
+      {pagamentoConfirmado && (
+        <Card className="border-green-200 bg-green-50">
+          <CardContent className="py-6 flex flex-col items-center gap-3 text-center">
+            <CheckCircle2 className="size-12 text-green-600" />
+            <div>
+              <p className="font-semibold text-green-800 text-lg">Pagamento confirmado!</p>
+              <p className="text-green-700 text-sm mt-1">
+                O pagamento foi registrado com sucesso. Parcelas e empréstimo atualizados.
+              </p>
+            </div>
+            {loanId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-green-300 text-green-700 hover:bg-green-100"
+                onClick={() => window.location.href = `/emprestimos/${loanId}`}
+              >
+                Ver parcelas do contrato
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Gerar cobrança — bloqueado se QR ativo já existe */}
+      {installmentId > 0 && !pagamentoConfirmado && (
         <Card>
           <CardHeader><CardTitle className="text-base">Gerar Cobrança</CardTitle></CardHeader>
           <CardContent className="space-y-4">
+            {temQrAtivo && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-800 flex items-start gap-2">
+                <Clock className="size-4 mt-0.5 shrink-0" />
+                <span>
+                  Já existe um QR Code ativo para esta parcela.{' '}
+                  <button
+                    className="underline font-medium"
+                    onClick={() => document.getElementById('qr-ativo')?.scrollIntoView({ behavior: 'smooth' })}
+                  >
+                    Ver abaixo
+                  </button>
+                </span>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button
                 variant={tipoGerar === 'pix' ? 'default' : 'outline'}
@@ -279,6 +347,11 @@ export default function PixPage() {
                   <option value="48">48 horas</option>
                   <option value="72">72 horas</option>
                 </Select>
+                {selectedInst && (
+                  <p className="text-xs text-muted-foreground">
+                    Expira no menor prazo entre a validade selecionada e o vencimento da parcela.
+                  </p>
+                )}
               </div>
             )}
 
@@ -304,11 +377,16 @@ export default function PixPage() {
 
             <Button
               onClick={handleSubmit(d => generateMut.mutate(d))}
-              disabled={generateMut.isPending}
-              className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={generateMut.isPending || (isOverdue && !isAdminOrFinanceiro)}
+              title={isOverdue && !isAdminOrFinanceiro ? 'Parcela vencida. Apenas financeiro ou admin pode gerar QR Code.' : undefined}
+              className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
             >
               <QrCode className="size-4" />
-              {generateMut.isPending ? 'Gerando...' : `Gerar ${tipoGerar === 'pix' ? 'QR Code PIX' : 'Boleto'}`}
+              {generateMut.isPending
+                ? 'Gerando...'
+                : temQrAtivo
+                  ? `Reemitir ${tipoGerar === 'pix' ? 'QR Code PIX' : 'Boleto'}`
+                  : `Gerar ${tipoGerar === 'pix' ? 'QR Code PIX' : 'Boleto'}`}
             </Button>
           </CardContent>
         </Card>
@@ -318,7 +396,7 @@ export default function PixPage() {
       {loadingCharges ? (
         <Skeleton className="h-64 w-full rounded-xl" />
       ) : latestCharge ? (
-        <Card className={latestActive ? 'border-blue-200' : ''}>
+        <Card id="qr-ativo" className={latestActive ? 'border-blue-200' : ''}>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">
@@ -327,18 +405,17 @@ export default function PixPage() {
               <ChargeStatusBadge status={latestCharge.status} expiresAt={latestCharge.expiresAt} />
             </div>
             <div className="flex gap-2">
-              {/* Reissue when expired or overdue */}
               {(latestCharge.status === 'expirado' ||
                 latestCharge.status === 'cancelado' ||
                 (latestCharge.status === 'pendente' && latestCharge.expiresAt && new Date(latestCharge.expiresAt) < new Date())
-              ) && isOverdue !== undefined && (
+              ) && isAdminOrFinanceiro && (
                 <Button
                   size="sm"
                   variant="outline"
                   className="border-orange-300 text-orange-700 hover:bg-orange-50 gap-1 text-xs"
                   disabled={reissueMut.isPending}
                   onClick={() => {
-                    if (confirm(`Reemitir com encargos de mora e multa calculados automaticamente?`))
+                    if (confirm('Reemitir com encargos de mora e multa calculados automaticamente?'))
                       reissueMut.mutate(latestCharge.id)
                   }}
                 >
@@ -346,11 +423,11 @@ export default function PixPage() {
                   Reemitir{isOverdue ? ' com Encargos' : ''}
                 </Button>
               )}
-              {/* Check status */}
               {latestCharge.status === 'pendente' && (
                 <Button
                   size="sm"
                   variant="ghost"
+                  title="Verificar status no Mercado Pago"
                   onClick={() => api.get(`/pix/${latestCharge.id}/status`).then(() => refetchCharges())}
                 >
                   <RefreshCw className="size-3" />
@@ -360,21 +437,29 @@ export default function PixPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
+            {/* Polling indicator */}
+            {latestActive && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-block size-2 rounded-full bg-blue-400 animate-pulse" />
+                Aguardando confirmação de pagamento...
+              </div>
+            )}
+
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Valor principal</span>
               <span className="font-semibold">{formatCurrency(Number(latestCharge.amount))}</span>
             </div>
             {latestCharge.valorEncargos && Number(latestCharge.valorEncargos) > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-orange-600">Encargos (mora + multa)</span>
-                <span className="font-semibold text-orange-600">+ {formatCurrency(Number(latestCharge.valorEncargos))}</span>
-              </div>
-            )}
-            {latestCharge.valorEncargos && Number(latestCharge.valorEncargos) > 0 && (
-              <div className="flex justify-between text-sm border-t pt-2">
-                <span className="font-medium">Total</span>
-                <span className="font-bold">{formatCurrency(Number(latestCharge.amount) + Number(latestCharge.valorEncargos))}</span>
-              </div>
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-orange-600">Encargos (mora + multa)</span>
+                  <span className="font-semibold text-orange-600">+ {formatCurrency(Number(latestCharge.valorEncargos))}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t pt-2">
+                  <span className="font-medium">Total</span>
+                  <span className="font-bold">{formatCurrency(Number(latestCharge.amount) + Number(latestCharge.valorEncargos))}</span>
+                </div>
+              </>
             )}
 
             <ExpiresIn expiresAt={latestCharge.expiresAt} />
@@ -477,7 +562,9 @@ export default function PixPage() {
                 <div key={c.id} className="rounded-lg border px-4 py-3 text-sm flex items-center justify-between">
                   <div>
                     <span className="font-medium capitalize">{c.tipo} #{c.id}</span>
-                    <span className="text-muted-foreground ml-2">{formatCurrency(Number(c.amount))}{c.valorEncargos ? ` + ${formatCurrency(Number(c.valorEncargos))} encargos` : ''}</span>
+                    <span className="text-muted-foreground ml-2">
+                      {formatCurrency(Number(c.amount))}{c.valorEncargos ? ` + ${formatCurrency(Number(c.valorEncargos))} encargos` : ''}
+                    </span>
                   </div>
                   <div className="flex items-center gap-3">
                     <ChargeStatusBadge status={c.status} expiresAt={c.expiresAt} />

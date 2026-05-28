@@ -47,4 +47,20 @@ export const portalApi = {
 
   updateNotificacoes: (body: { notificacoesEmail?: boolean; notificacoesWhatsapp?: boolean }) =>
     portalClient.patch('/portal/notificacoes', body).then(r => r.data),
+
+  // LGPD
+  registrarConsentimento: (body: { tipo: string; versao: string; aceito: boolean }) =>
+    portalClient.post('/portal/lgpd/consentimento', body).then(r => r.data),
+
+  listarConsentimentos: () =>
+    portalClient.get('/portal/lgpd/consentimentos').then(r => r.data),
+
+  criarSolicitacaoTitular: (body: { tipo: string; descricao: string }) =>
+    portalClient.post('/portal/lgpd/solicitacao', body).then(r => r.data),
+
+  listarSolicitacoesTitular: () =>
+    portalClient.get('/portal/lgpd/solicitacoes').then(r => r.data),
+
+  getMeusDados: () =>
+    portalClient.get('/portal/lgpd/meus-dados').then(r => r.data),
 }

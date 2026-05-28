@@ -170,26 +170,45 @@ export class ReportsService {
 
   private agruparPorConsultor(
     parcelas: Array<{
-      netGain: { toString(): string };
+      installmentAmount: { toString(): string };
+      principalPayback:  { toString(): string };
+      netGain:           { toString(): string };
       loan: { consultor: { id: number; nome: string } | null };
     }>,
   ) {
-    const mapa = new Map<number, { id: number; nome: string; faturamento: Decimal; quantidade: number }>();
+    const mapa = new Map<number | null, {
+      id: number | null; nome: string
+      totalRecebido:      Decimal
+      faturamentoBruto:   Decimal
+      recuperacaoCapital: Decimal
+      quantidadeParcelas: number
+    }>();
 
     for (const p of parcelas) {
-      if (!p.loan.consultor) continue;
-      const { id, nome } = p.loan.consultor;
-      const entrada = mapa.get(id) ?? { id, nome, faturamento: new Decimal(0), quantidade: 0 };
-      entrada.faturamento = entrada.faturamento.plus(p.netGain.toString());
-      entrada.quantidade += 1;
-      mapa.set(id, entrada);
+      const consultor = p.loan.consultor;
+      const key  = consultor?.id ?? null;
+      const nome = consultor?.nome ?? 'Sem consultor';
+      const entrada = mapa.get(key) ?? {
+        id: key, nome,
+        totalRecebido:      new Decimal(0),
+        faturamentoBruto:   new Decimal(0),
+        recuperacaoCapital: new Decimal(0),
+        quantidadeParcelas: 0,
+      };
+      entrada.totalRecebido      = entrada.totalRecebido.plus(p.installmentAmount.toString());
+      entrada.faturamentoBruto   = entrada.faturamentoBruto.plus(p.netGain.toString());
+      entrada.recuperacaoCapital = entrada.recuperacaoCapital.plus(p.principalPayback.toString());
+      entrada.quantidadeParcelas += 1;
+      mapa.set(key, entrada);
     }
 
     return Array.from(mapa.values()).map((c) => ({
-      consultorId:  c.id,
-      consultorNome: c.nome,
-      quantidade:   c.quantidade,
-      faturamento:  c.faturamento.toFixed(2),
+      consultorId:        c.id,
+      consultorNome:      c.nome,
+      totalRecebido:      c.totalRecebido.toFixed(2),
+      faturamentoBruto:   c.faturamentoBruto.toFixed(2),
+      recuperacaoCapital: c.recuperacaoCapital.toFixed(2),
+      quantidadeParcelas: c.quantidadeParcelas,
     }));
   }
 

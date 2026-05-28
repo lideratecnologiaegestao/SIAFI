@@ -1,315 +1,323 @@
 # SIAFI 2.0 — Guia do Frontend (Next.js)
-
-> Última atualização: 2026-05-22 | Next.js 16 · TypeScript 5 · Tailwind CSS 4
+> Última atualização: 2026-05-23 | Next.js 16 · TypeScript 5 · Tailwind CSS 4 · shadcn/ui
 
 ---
 
-## Estrutura de Diretórios
+## 1. Estrutura de Diretórios
 
 ```
 frontend/src/
 ├── app/
 │   ├── (auth)/
-│   │   ├── login/page.tsx           → Login username+senha / Google
-│   │   └── mfa-setup/page.tsx       → Configuração MFA TOTP
-│   ├── (dashboard)/                 → Layout com sidebar (operadores internos)
-│   │   ├── layout.tsx               → Sidebar + Topbar + AuthGuard
-│   │   ├── dashboard/page.tsx       → KPIs + listas resumidas
-│   │   ├── clientes/
-│   │   │   ├── page.tsx             → Lista + busca + vincular consultor
-│   │   │   ├── novo/page.tsx        → Formulário com docs + consultor
-│   │   │   └── [id]/
-│   │   │       ├── page.tsx         → Detalhe + contratos + score + portal
-│   │   │       └── editar/page.tsx  → Edição completa
-│   │   ├── emprestimos/
-│   │   │   ├── page.tsx             → Lista + filtros + somas por status
-│   │   │   ├── novo/page.tsx        → Criação + config. cobrança + simulador
-│   │   │   └── [id]/page.tsx        → Detalhe + parcelas + cobranças (tabs)
-│   │   ├── parcelas/page.tsx        → Parcelas em atraso
-│   │   ├── pagamentos/
-│   │   │   ├── page.tsx             → Histórico + estorno
-│   │   │   └── novo/page.tsx        → cliente → loan → parcela → pagar
-│   │   ├── inadimplentes/page.tsx   → Carteira inadimplente
-│   │   ├── caixa/page.tsx           → Saldo + transações + lançamento
-│   │   ├── renegociacoes/
-│   │   │   ├── page.tsx
-│   │   │   └── nova/page.tsx
-│   │   ├── reparcelamentos/
-│   │   │   ├── page.tsx             → Lista + proposta + aprovação + execução
-│   │   │   └── nova/page.tsx        → Formulário + simulador inline
-│   │   ├── intencoes/page.tsx       → Intenções com SLA + score
-│   │   ├── solicitacoes/page.tsx    → Solicitações do consultor
-│   │   ├── cobrancas/page.tsx       → Cobranças da carteira (consultor)
-│   │   ├── consultor/
-│   │   │   └── carteira/
-│   │   │       ├── page.tsx         → Visão da carteira
-│   │   │       └── [clientId]/page.tsx → Detalhe do cliente (consultor)
-│   │   ├── pix/page.tsx             → Gerador QR Code PIX
-│   │   ├── conciliacao/page.tsx     → Conciliação bancária mensal
-│   │   ├── relatorios/page.tsx      → 5 abas: carteira, clientes, movim., contratos, faturamento
-│   │   ├── mensagens/page.tsx       → Chat interno + Supabase Realtime
-│   │   ├── notificacoes/page.tsx    → Log de notificações
-│   │   ├── suporte/page.tsx         → Tickets de suporte
-│   │   ├── usuarios/
-│   │   │   ├── page.tsx
-│   │   │   ├── novo/page.tsx
-│   │   │   └── [id]/editar/page.tsx
-│   │   ├── configuracoes/page.tsx   → Parâmetros admin
-│   │   └── auditoria/page.tsx       → Log de auditoria com detalhes expandíveis
-│   ├── portal/                      → Portal do cliente (role=cliente)
-│   │   ├── layout.tsx
-│   │   ├── home/page.tsx
-│   │   ├── contratos/page.tsx
-│   │   ├── pagamentos/page.tsx      → PIX via QR Code
-│   │   ├── suporte/page.tsx
-│   │   └── perfil/page.tsx
-│   └── auth/callback/route.ts       → Callback Google OAuth
+│   │   └── login/                      ← Login + OAuth Google + MFA
+│   ├── (dashboard)/                    ← Layout compartilhado: Sidebar + Topbar
+│   │   ├── portal-layout-content.tsx   ← Layout condicional por role
+│   │   ├── dashboard/                  ← Dashboard renderizado por perfil
+│   │   ├── clientes/                   ← Lista · novo · [id] · [id]/editar
+│   │   ├── emprestimos/                ← Lista · novo · [id]
+│   │   ├── parcelas/                   ← Parcelas em atraso
+│   │   ├── pagamentos/                 ← Histórico · novo
+│   │   ├── caixa/                      ← Saldo + movimentações + lançamentos
+│   │   ├── inadimplentes/              ← Carteira inadimplente global
+│   │   ├── renegociacoes/              ← Lista · nova
+│   │   ├── reparcelamentos/            ← Lista · nova · [id]
+│   │   ├── intencoes/                  ← Lista · [id]
+│   │   ├── solicitacoes/               ← Solicitações ao financeiro
+│   │   ├── cobrancas/                  ← Cobranças da carteira do consultor
+│   │   ├── consultor/carteira/         ← Carteira do consultor
+│   │   ├── pix/                        ← Gerador QR Code PIX
+│   │   ├── conciliacao/                ← Conciliação bancária
+│   │   ├── relatorios/                 ← 5 abas de relatório
+│   │   ├── mensagens/                  ← Chat interno + Realtime
+│   │   ├── notificacoes/               ← Log de notificações
+│   │   ├── suporte/                    ← Tickets · [id] · novo
+│   │   ├── usuarios/                   ← Lista · novo · [id]/editar
+│   │   ├── configuracoes/              ← Parâmetros + templates + integrações
+│   │   └── auditoria/                  ← Log de auditoria
+│   └── (portal)/                       ← Layout do portal do cliente
+│       └── portal/
+│           ├── page.tsx                ← Home: contratos + progresso
+│           ├── contratos/[id]/         ← Detalhe do contrato + parcelas
+│           ├── pagamentos/             ← Histórico de pagamentos
+│           ├── pagamentos/pix/[installmentId]/ ← Tela de pagamento PIX
+│           ├── suporte/                ← Chamados · novo · [id]
+│           └── perfil/                 ← Senha · 2FA · preferências
 ├── components/
-│   ├── layout/
-│   │   ├── sidebar.tsx              → Menu lateral com badges e grupos por role
-│   │   └── topbar.tsx               → Header com usuário e logout
-│   ├── portal/
-│   │   └── portal-card.tsx          → Card de status do portal (em /clientes/[id])
-│   └── ui/                          → button, input, card, badge, skeleton, select, textarea, label
-├── contexts/
-│   └── auth.context.tsx             → AuthProvider + useAuth() + AuthUser
-├── hooks/
-│   └── useUnreadCount.ts            → Badge de mensagens não-lidas
-└── lib/
-    ├── api.ts                       → Axios instance + interceptor refresh JWT
-    ├── utils.ts                     → formatCurrency, formatDate, formatCPF, etc.
-    └── supabase/client.ts           → Supabase browser client (Realtime)
+│   ├── ui/                 ← shadcn/ui: button, input, card, badge, skeleton, select, textarea
+│   ├── layout/             ← Sidebar, Topbar, BottomNav (portal mobile)
+│   └── portal/             ← Componentes exclusivos do portal do cliente
+├── hooks/                  ← Hooks customizados
+├── lib/
+│   ├── api.ts              ← Axios com interceptors JWT e refresh automático
+│   ├── utils.ts            ← formatCurrency, formatDate, formatDateTime
+│   └── supabase/
+│       └── client.ts       ← Supabase browser client (Realtime)
+└── styles/                 ← Estilos globais Tailwind
 ```
 
 ---
 
-## AuthContext e Proteção de Rotas
+## 2. Route-Role Guard
+
+Todas as rotas do grupo `(dashboard)` são protegidas pelo `RouteRoleGuard` via `middleware.ts`. O objeto `ROUTE_ROLES` mapeia rota → roles permitidas:
+
+| Rota | Roles permitidas |
+|------|----------------|
+| `/dashboard` | admin, financeiro, consultor, caixa, cliente |
+| `/clientes` | admin, financeiro, caixa |
+| `/clientes/novo` | admin, financeiro |
+| `/clientes/[id]` | admin, financeiro, caixa |
+| `/clientes/[id]/editar` | admin, financeiro |
+| `/emprestimos` | admin, financeiro |
+| `/emprestimos/novo` | admin, financeiro |
+| `/emprestimos/[id]` | admin, financeiro, caixa |
+| `/parcelas` | admin, financeiro, caixa |
+| `/pagamentos` | admin, financeiro, caixa |
+| `/pagamentos/novo` | admin, financeiro, caixa |
+| `/caixa` | admin, financeiro, caixa |
+| `/inadimplentes` | admin, financeiro |
+| `/renegociacoes` | admin, financeiro |
+| `/renegociacoes/nova` | admin, financeiro |
+| `/reparcelamentos` | admin, financeiro, consultor |
+| `/reparcelamentos/nova` | admin, financeiro, consultor |
+| `/reparcelamentos/[id]` | admin, financeiro, consultor |
+| `/intencoes` | admin, financeiro, consultor |
+| `/intencoes/[id]` | admin, financeiro, consultor |
+| `/solicitacoes` | admin, financeiro, consultor |
+| `/cobrancas` | admin, financeiro, consultor |
+| `/consultor/carteira` | consultor, admin, financeiro |
+| `/pix` | admin, financeiro, consultor |
+| `/conciliacao` | admin, financeiro |
+| `/relatorios` | admin, financeiro |
+| `/mensagens` | admin, financeiro, consultor, caixa |
+| `/notificacoes` | admin, financeiro |
+| `/suporte` | admin, financeiro, caixa |
+| `/suporte/[id]` | admin, financeiro, caixa |
+| `/suporte/novo` | admin, financeiro, caixa |
+| `/usuarios` | admin |
+| `/usuarios/novo` | admin |
+| `/usuarios/[id]/editar` | admin |
+| `/configuracoes` | admin |
+| `/auditoria` | admin |
+| `/portal/*` | cliente |
+
+---
+
+## 3. AuthContext e Session
+
+`AuthContext` (Provider em `app/layout.tsx`) expõe:
 
 ```typescript
-// contexts/auth.context.tsx
-export interface AuthUser {
-  id: number
-  username: string
-  nome: string
-  role: 'admin' | 'financeiro' | 'consultor' | 'caixa' | 'cliente'
-}
+const { user, role, isLoading, signOut } = useAuth()
+```
 
-export function useAuth() {
-  return useContext(AuthContext) // { user, isLoading, isAuthenticated, login, logout }
-}
+**Refresh automático:** interceptor Axios detecta 401 → `POST /api/auth/refresh` → repete a request original. Se o refresh falhar → `signOut()` + redirect `/login`.
 
-// layout.tsx do dashboard — proteção automática
+**Redirect no login:** `admin`/`financeiro`/`consultor`/`caixa` → `/dashboard`; `cliente` → `/portal`.
+
+---
+
+## 4. Dashboards por Perfil
+
+`/dashboard/page.tsx` renderiza condicionalmente com base na `role` do `AuthContext`:
+
+| Role | Componente | Foco principal |
+|------|-----------|---------------|
+| admin, financeiro | `DashboardFinanceiro` | KPIs financeiros, Fila SLA, Liberações pendentes, Aging |
+| consultor | `DashboardConsultor` | Carteira, cobranças urgentes, intenções pendentes |
+| caixa | `DashboardCaixa` | Liberações pendentes, parcelas do dia, saldo atual |
+
+---
+
+## 5. Layout: Sidebar, Topbar, BottomNav
+
+**Sidebar** — grupos filtrados pela `role`:
+
+| Grupo | Itens | Roles |
+|-------|-------|-------|
+| Início | Dashboard | todos |
+| Operacional | Clientes, Empréstimos, Parcelas, Pagamentos, Caixa | admin, financeiro, caixa |
+| Consultor | Minha Carteira, Intenções, Solicitações, Cobranças | consultor |
+| Financeiro | Inadimplentes, Reparcelamentos, PIX, Renegociações, Conciliação | admin, financeiro |
+| Relatórios | Relatórios | admin, financeiro |
+| Comunicação | Mensagens (com badge), Notificações, Suporte | admin, financeiro, consultor, caixa |
+| Administração | Usuários, Configurações, Auditoria | admin |
+
+**Topbar** — nome do usuário, badge de mensagens não lidas (polling 30s + Realtime), botão sair.
+
+**BottomNav** — navegação inferior para o portal do cliente (mobile-first). Itens: Início, Parcelas, PIX, Suporte, Perfil.
+
+---
+
+## 6. Padrão de Página de Lista
+
+```typescript
 'use client'
-const { user, isLoading } = useAuth()
-if (!isLoading && !user) redirect('/login')
-if (user?.role === 'cliente') redirect('/portal/home')
-```
+export default function ListaPage() {
+  const qc = useQueryClient()
 
-### Verificação de Role nos Componentes
+  const { data, isLoading } = useQuery({
+    queryKey: ['entidade'],
+    queryFn: () => api.get('/endpoint').then(r => r.data),
+  })
 
-```typescript
-const { user } = useAuth()
-const canManage = user?.role === 'admin' || user?.role === 'financeiro'
-const isConsultor = user?.role === 'consultor'
+  const mutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/endpoint/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entidade'] }),
+  })
 
-// Renderização condicional
-{canManage && <Button onClick={handleVincular}>Vincular Consultor</Button>}
-```
-
----
-
-## Interceptor de Refresh JWT
-
-```typescript
-// lib/api.ts — interceptor automático de 401
-api.interceptors.response.use(
-  (res) => res,
-  async (error) => {
-    if (error.response?.status === 401 && !error.config._retry) {
-      error.config._retry = true
-      const { data } = await axios.post('/api/auth/refresh', { refreshToken })
-      tokenStore.set(data.accessToken)
-      error.config.headers.Authorization = `Bearer ${data.accessToken}`
-      return api(error.config)
-    }
-    return Promise.reject(error)
-  }
-)
+  if (isLoading) return <SkeletonCard />
+  return <DataTable data={data} ... />
+}
 ```
 
 ---
 
-## Padrão de Página de Lista
+## 7. Formulários
 
 ```typescript
-'use client'
-const { data, isLoading, isError, refetch } = useQuery({
-  queryKey: ['entidade', { search, status, page }],
-  queryFn: () => api.get('/endpoint', { params: { search, status, page, limit: 20 } })
-    .then(r => r.data),
-})
-
-const mutation = useMutation({
-  mutationFn: (id: number) => api.delete(`/endpoint/${id}`),
-  onSuccess: () => qc.invalidateQueries({ queryKey: ['entidade'] }),
+const form = useForm<Schema>({
+  resolver: zodResolver(schema) as any, // cast necessário — Zod v4 + react-hook-form
 })
 ```
 
----
+Upload de documentos: `FormData` com `Content-Type: multipart/form-data`.
 
-## Padrão de Formulário
-
-```typescript
-const schema = z.object({
-  nome: z.string().min(3),
-  consultorId: z.string().optional(),      // select → string no form, number na API
-  multaPercentual: z.number().min(0).max(1),
-})
-
-const { register, handleSubmit, control } = useForm<FormData>({
-  resolver: zodResolver(schema) as any,    // cast necessário Zod v4 + react-hook-form
-})
-
-// Campos com máscara (CPF, moeda): usar <Controller>
-<Controller
-  name="cpf"
-  control={control}
-  render={({ field }) => (
-    <Input
-      value={formatCpfCnpj(field.value ?? '')}
-      onChange={(e) => field.onChange(formatCpfCnpj(e.target.value))}
-    />
-  )}
-/>
-```
+Operações destrutivas sempre precedidas de `confirm()` antes de executar a mutation.
 
 ---
 
-## Realtime (Chat Interno)
+## 8. Dados Financeiros
+
+| Regra | Detalhe |
+|-------|---------|
+| Exibição | Sempre `formatCurrency(value)` — nunca exibir número bruto |
+| Datas | `formatDate()` para dd/MM/yyyy · `formatDateTime()` para dd/MM/yyyy HH:mm |
+| Cálculos no cliente | `Decimal.js` — nunca `Math.round()` ou operações nativas com `float` |
+| Realtime cast | `'postgres_changes' as any` — necessário por tipagem incompleta do SDK Supabase |
+
+---
+
+## 9. Supabase Realtime no Frontend
 
 ```typescript
-// hooks/useUnreadCount.ts — polling 30s + Supabase Realtime
-import { getSupabaseBrowserClient } from '@/lib/supabase/client'
-
-const supabase = getSupabaseBrowserClient()
+// Escutar novas mensagens de uma conversa
 supabase
-  .channel('mensagens-inseridas')
-  .on(
-    'postgres_changes' as any,  // cast necessário (tipagem Supabase)
-    { event: 'INSERT', schema: 'public', table: 'mensagens' },
-    () => qc.invalidateQueries({ queryKey: ['mensagens-badge'] })
-  )
+  .channel(`conversa-${id}`)
+  .on('postgres_changes' as any, {
+    event: 'INSERT',
+    schema: 'public',
+    table: 'mensagens',
+    filter: `conversa_id=eq.${id}`,
+  }, (payload) => {
+    // atualizar lista de mensagens
+  })
   .subscribe()
 ```
 
 ---
 
-## Rotas por Role (Sidebar)
+## 10. Hooks Customizados
 
-| Rota | Admin | Financeiro | Caixa | Consultor |
-|------|-------|-----------|-------|-----------|
-| /dashboard | ✅ | ✅ | ✅ | ✅ |
-| /clientes | ✅ | ✅ | ✅ | — |
-| /emprestimos | ✅ | ✅ | — | — |
-| /parcelas | ✅ | ✅ | ✅ | — |
-| /pagamentos | ✅ | ✅ | ✅ | — |
-| /inadimplentes | ✅ | ✅ | — | — |
-| /caixa | ✅ | ✅ | ✅ | — |
-| /reparcelamentos | ✅ | ✅ | — | ✅ |
-| /intencoes | ✅ | ✅ | — | ✅ |
-| /solicitacoes | ✅ | ✅ | — | ✅ |
-| /cobrancas | ✅ | ✅ | — | ✅ |
-| /consultor/carteira | ✅ | ✅ | — | ✅ |
-| /relatorios | ✅ | ✅ | — | — |
-| /mensagens | ✅ | ✅ | ✅ | ✅ |
-| /configuracoes | ✅ | — | — | — |
-| /auditoria | ✅ | — | — | — |
-| /usuarios | ✅ | — | — | — |
+| Hook | Descrição |
+|------|-----------|
+| `useAuth()` | Usuário, role, signOut do AuthContext |
+| `useUnreadCount()` | Badge de mensagens não lidas (polling 30s) |
+| `useMensagensNaoLidas()` | Contagem de não-lidas por conversa |
+| `useConversaRealtime(id)` | Realtime de uma conversa específica |
+| `useRealtimePortal()` | Realtime de installments e payments no portal do cliente |
+| `usePortalPix(installmentId)` | Geração e polling de confirmação de QR Code PIX no portal |
+| `useEmailTemplate(type)` | Carregar, editar e salvar template de e-mail |
+| `useScoreRisco(clientId)` | Score do cliente com invalidação automática pós-pagamento |
 
 ---
 
-## Funções Utilitárias (lib/utils.ts)
+## 11. Componentes Reutilizáveis do Portal
 
-```typescript
-formatCurrency(valor: number | string): string
-// R$ 1.234,56
-
-formatDate(date: string | Date): string
-// 21/05/2026
-
-formatDateTime(date: string | Date): string
-// 21/05/2026, 14:30
-
-formatCPF(cpf: string): string
-// 000.000.000-00
-
-formatPhone(phone: string): string
-// (65) 99999-9999
-
-formatCEP(cep: string): string
-// 00000-000
-
-STATUS_LOAN: Record<string, { label: string; variant: BadgeVariant }>
-// ativo, quitado, cancelado, atrasado, aguardando_aceite, aguardando_liberacao
-```
+| Componente | Arquivo | Descrição |
+|------------|---------|-----------|
+| `MoneyDisplay` | `portal/money-display.tsx` | Valor monetário formatado com tamanho configurável |
+| `ProgressBar` | `portal/progress-bar.tsx` | Barra de progresso das parcelas pagas |
+| `StatusBadge` | `portal/status-badges.tsx` | Badge colorido por status de parcela ou contrato |
+| `SkeletonCard` | `portal/skeleton-card.tsx` | Skeleton de carregamento padrão do portal |
+| `PCard` | `portal/p-card.tsx` | Card padrão do portal (wrapper estilizado) |
+| `ScoreIndicator` | `portal/score-indicator.tsx` | Indicador visual do score de risco (0–100) |
+| `PixCopyButton` | `portal/pix-copy-button.tsx` | Botão copia-e-cola com feedback visual de copiado |
 
 ---
 
-## Componentes UI Disponíveis
+## 12. Componentes de Negócio
 
-```
-components/ui/
-├── button.tsx      → variant: default|outline|ghost|destructive; size: sm|default|lg
-├── input.tsx       → padrão HTML input com estilo
-├── textarea.tsx    → área de texto com resize
-├── select.tsx      → select nativo estilizado
-├── label.tsx       → label acessível
-├── card.tsx        → Card, CardHeader, CardTitle, CardContent
-├── badge.tsx       → variant: default|outline|success|secondary|destructive
-└── skeleton.tsx    → placeholder de carregamento
-```
+| Componente | Descrição |
+|------------|-----------|
+| `SimuladorReparcelamento` | Simulação inline com `Decimal.js` — exibe parcelas e totais sem gravar |
+| `ScoreRiscoCard` | Card com score, histórico de fatores e classificação de risco |
+| `EmailPreview` | Preview renderizado do template de e-mail com variáveis substituídas |
+| `AceiteDigital` | Tela de revisão e assinatura do contrato no portal do cliente |
+| `LiberacaoCapital` | Formulário de confirmação de entrega do capital (perfil caixa) |
 
 ---
 
-## Regras de Formatação
+## 13. API Client
 
-- **Dados monetários:** sempre `formatCurrency()` — nunca `toFixed()` direto
-- **Datas:** sempre `formatDate()` ou `formatDateTime()`
-- **Simulações financeiras:** `decimal.js` no cliente — nunca `Math.round()` em dinheiro
-- **Operações destrutivas:** `confirm()` obrigatório antes de executar
-- **Rotas:** sempre em **português** (`/clientes`, `/emprestimos`, `/pagamentos`)
-- **Score:** exibir sempre como 0–100 com classificação textual (Baixo/Médio/Alto/Excelente)
+`lib/api.ts` — instância Axios configurada:
 
----
-
-## Auditoria — Página /auditoria
-
-A página de auditoria exibe o log de todas as ações do sistema com:
-
-- **Filtro por ação** (ex: `EMAIL_ENVIADO`, `EMAIL_FALHOU`, `LOGIN`, `PORTAL_ATIVADO`)
-- **Filtro por entidade** (ex: `client`, `email`, `loan`)
-- **Botões de atalho** para ações frequentes
-- **Linha clicável** expande detalhes (`contexto` com JSON formatado)
-- **Codificação por cor:**
-  - Verde: `ENVIADO`, `ATIVADO`, `APROVADO`, `EXECUTADO`, `LIBERADO`
-  - Vermelho: `FALHOU`, `ERRO`, `BLOQUEADO`, `NEGADO`
-  - Amarelo: `IGNORADO`, `PENDENTE`, `AVISO`
-  - Azul: ações de `EMAIL`
+- `baseURL`: `process.env.NEXT_PUBLIC_API_URL`
+- **Request interceptor:** injeta `Authorization: Bearer <accessToken>`
+- **Response interceptor:** em 401 → `POST /api/auth/refresh` → repete a request; em falha → `signOut()` + redirect `/login`
 
 ---
 
-## Build e Verificação
+## 14. Rotas Completas por Perfil
 
-```bash
-# Type check
-npx tsc --noEmit
+| Rota | Roles | Descrição |
+|------|-------|-----------|
+| `/login` | público | Login + Google + MFA |
+| `/dashboard` | todos | Dashboard condicional por perfil |
+| `/clientes` | admin, financeiro, caixa | Lista paginada com busca |
+| `/clientes/novo` | admin, financeiro | Cadastro com upload de documentos |
+| `/clientes/[id]` | admin, financeiro, caixa | Detalhe + contratos + score |
+| `/clientes/[id]/editar` | admin, financeiro | Edição de dados cadastrais |
+| `/emprestimos` | admin, financeiro | Lista com filtros e soma por status |
+| `/emprestimos/novo` | admin, financeiro | Criação + simulador inline |
+| `/emprestimos/[id]` | admin, financeiro, caixa | Detalhe + pagamento rápido |
+| `/parcelas` | admin, financeiro, caixa | Parcelas em atraso |
+| `/pagamentos` | admin, financeiro, caixa | Histórico + estorno |
+| `/pagamentos/novo` | admin, financeiro, caixa | Registrar pagamento (CPF → parcela) |
+| `/caixa` | admin, financeiro, caixa | Saldo + extrato + lançamentos |
+| `/inadimplentes` | admin, financeiro | Carteira inadimplente global |
+| `/renegociacoes` | admin, financeiro | Lista de renegociações |
+| `/renegociacoes/nova` | admin, financeiro | Formulário de renegociação |
+| `/reparcelamentos` | admin, financeiro, consultor | Lista + fluxo de aprovação |
+| `/reparcelamentos/nova` | admin, financeiro, consultor | Formulário + simulador |
+| `/reparcelamentos/[id]` | admin, financeiro, consultor | Detalhe + ações por etapa |
+| `/intencoes` | admin, financeiro, consultor | Lista com SLA e status |
+| `/intencoes/[id]` | admin, financeiro, consultor | Detalhe + aprovar/rejeitar |
+| `/solicitacoes` | admin, financeiro, consultor | Solicitações ao financeiro |
+| `/cobrancas` | admin, financeiro, consultor | Cobranças + registro de contato |
+| `/consultor/carteira` | consultor, admin, financeiro | Carteira do consultor |
+| `/pix` | admin, financeiro, consultor | Gerador de QR Code PIX |
+| `/conciliacao` | admin, financeiro | Conciliação bancária |
+| `/relatorios` | admin, financeiro | 5 abas: carteira, faturamento, clientes, movimentação, contratos |
+| `/mensagens` | admin, financeiro, consultor, caixa | Chat interno |
+| `/notificacoes` | admin, financeiro | Log de notificações enviadas |
+| `/suporte` | admin, financeiro, caixa | Lista de tickets |
+| `/suporte/[id]` | admin, financeiro, caixa | Detalhe do ticket |
+| `/suporte/novo` | admin, financeiro, caixa | Abrir ticket |
+| `/usuarios` | admin | Lista de operadores |
+| `/usuarios/novo` | admin | Criar operador |
+| `/usuarios/[id]/editar` | admin | Editar operador |
+| `/configuracoes` | admin | Parâmetros + integrações + templates de e-mail |
+| `/auditoria` | admin | Log de auditoria com filtros |
+| `/portal` | cliente | Home do portal: contratos + progresso |
+| `/portal/contratos/[id]` | cliente | Detalhe do contrato + parcelas |
+| `/portal/pagamentos` | cliente | Histórico de pagamentos |
+| `/portal/pagamentos/pix/[installmentId]` | cliente | Tela PIX: QR Code + copia-e-cola |
+| `/portal/suporte` | cliente | Lista de chamados |
+| `/portal/suporte/novo` | cliente | Abrir chamado |
+| `/portal/suporte/[id]` | cliente | Detalhe do chamado |
+| `/portal/perfil` | cliente | Senha + 2FA + preferências de notificação |
 
-# Build de produção
-npm run build
+---
 
-# Verificar erros nas páginas de clientes
-npx tsc --noEmit 2>&1 | grep clientes
-
-# Restart
-sc.exe stop SIAFI-WEB && sleep 3 && sc.exe start SIAFI-WEB
-```
+*Última atualização: 2026-05-23 | Mantido por: equipe SIAFI*

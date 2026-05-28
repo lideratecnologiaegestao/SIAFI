@@ -189,7 +189,73 @@ async function upsertClient(params: ClientData) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+async function seedEmpresaSettings() {
+  const chaves: Array<{ chave: string; valor: string }> = [
+    { chave: 'empresa.nome',               valor: '[NOME COMPLETO DA EMPRESA]' },
+    { chave: 'empresa.nomeFantasia',       valor: '[NOME FANTASIA]' },
+    { chave: 'empresa.cnpj',               valor: '' },
+    { chave: 'empresa.inscricaoEstadual',  valor: '' },
+    { chave: 'empresa.email',              valor: '' },
+    { chave: 'empresa.emailFinanceiro',    valor: '' },
+    { chave: 'empresa.telefone',           valor: '' },
+    { chave: 'empresa.whatsapp',           valor: '' },
+    { chave: 'empresa.site',               valor: '' },
+    { chave: 'empresa.logradouro',         valor: '' },
+    { chave: 'empresa.numero',             valor: '' },
+    { chave: 'empresa.complemento',        valor: '' },
+    { chave: 'empresa.bairro',             valor: '' },
+    { chave: 'empresa.cidade',             valor: 'Cuiabá' },
+    { chave: 'empresa.estado',             valor: 'MT' },
+    { chave: 'empresa.cep',                valor: '' },
+    { chave: 'empresa.logoUrl',            valor: '' },
+    { chave: 'empresa.logoBase64',         valor: '' },
+    { chave: 'empresa.faviconUrl',         valor: '' },
+    { chave: 'empresa.corPrimaria',        valor: '#185FA5' },
+    { chave: 'empresa.corSecundaria',      valor: '#0F6E56' },
+    { chave: 'empresa.corAcento',          valor: '#854F0B' },
+    { chave: 'empresa.corTexto',           valor: '#1a1a18' },
+    { chave: 'empresa.corFundo',           valor: '#f5f5f3' },
+    { chave: 'empresa.rodapePdf',          valor: '' },
+    { chave: 'empresa.clausulasAdicionais', valor: '' },
+  ]
+  for (const { chave, valor } of chaves) {
+    await prisma.siteSetting.upsert({
+      where:  { chave },
+      create: { chave, valor },
+      update: {}, // não sobrescreve valor já configurado
+    })
+    console.log(`  [ok] setting "${chave}"`)
+  }
+}
+
+async function seedLgpdSettings() {
+  const settings: Array<{ chave: string; valor: string }> = [
+    { chave: 'lgpd.versao_termos',        valor: '1.0' },
+    { chave: 'lgpd.versao_politica',      valor: '1.0' },
+    { chave: 'lgpd.versao_cookies',       valor: '1.0' },
+    { chave: 'lgpd.dpo_nome',             valor: 'Bruno Anderson' },
+    { chave: 'lgpd.dpo_email',            valor: 'privacidade@lidera.com.br' },
+    { chave: 'lgpd.email_suporte',        valor: 'lideraabrange@gmail.com' },
+    { chave: 'lgpd.data_ultima_revisao',  valor: '2026-05-24' },
+    { chave: 'lgpd.prazo_retencao_anos',  valor: '5' },
+  ]
+  for (const s of settings) {
+    await prisma.siteSetting.upsert({
+      where: { chave: s.chave },
+      create: { chave: s.chave, valor: s.valor },
+      update: { valor: s.valor },
+    })
+    console.log(`  [ok] setting "${s.chave}" = "${s.valor}"`)
+  }
+}
+
 async function main() {
+  console.log('\n=== SIAFI Seed — Empresa Settings ===')
+  await seedEmpresaSettings()
+
+  console.log('\n=== SIAFI Seed — LGPD Settings ===')
+  await seedLgpdSettings()
+
   console.log('\n=== SIAFI Seed — Operadores ===')
   await createOperator({ nome: 'João de Deus',  username: 'adm',        email: 'adm@siafi.lidera.srv.br',        role: 'admin' })
   await createOperator({ nome: 'Ana Maria',      username: 'financeiro', email: 'financeiro@siafi.lidera.srv.br', role: 'financeiro' })

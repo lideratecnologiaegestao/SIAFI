@@ -313,8 +313,9 @@ export class ClientPortalService {
     });
     if (!installment) throw new ForbiddenException('Parcela não encontrada.');
 
-    // Delegar geração ao PixService (idempotência já está lá)
-    const pix = await this.pixService.generate({ installmentId, tipo: 'pix' } as any) as any;
+    // Delegar geração ao PixService — cliente pode gerar QR para parcelas não vencidas
+    const portalUser = { id: clientId, role: 'cliente', tipo: 'cliente' as const, supabaseId: '', username: '', nome: '', aal: undefined }
+    const pix = await this.pixService.generate({ installmentId, tipo: 'pix' } as any, portalUser) as any;
 
     return {
       pixId: pix.id,

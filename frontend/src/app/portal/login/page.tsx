@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
@@ -24,6 +24,26 @@ export default function PortalLoginPage() {
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // Se houver sessão de staff ativa, encerra antes de mostrar o formulário
+  // para evitar que o AuthProvider global redirecione para o dashboard
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient()
+    supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
+      if (!session) return
+      try {
+        const b64 = session.access_token.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/')
+        const payload = b64 ? JSON.parse(atob(b64)) : {}
+        if (payload?.app_metadata?.role === 'cliente') {
+          router.replace('/portal')
+        } else {
+          supabase.auth.signOut()
+        }
+      } catch {
+        supabase.auth.signOut()
+      }
+    })
+  }, [router])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

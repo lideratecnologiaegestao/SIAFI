@@ -326,7 +326,7 @@ export default function PixPage() {
                 Escaneie com o app do seu banco
               </p>
               <img
-                src={pixData.qrImage}
+                src={`data:image/png;base64,${pixData.qrImage}`}
                 alt="QR Code PIX"
                 style={{
                   width: '220px',

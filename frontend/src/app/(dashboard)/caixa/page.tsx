@@ -12,7 +12,8 @@ import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTimeLocal } from '@/lib/utils'
+import { toast } from 'sonner'
 import api from '@/lib/api'
 
 interface Transaction {
@@ -44,7 +45,9 @@ export default function CaixaPage() {
       qc.invalidateQueries({ queryKey: ['transactions'] })
       setShowForm(false)
       setForm({ tipo: 'entrada', valor: '', descricao: '', categoria: '', data: new Date().toISOString().split('T')[0] })
+      toast.success(`Transação registrada com sucesso`)
     },
+    onError: () => toast.error('Não foi possível registrar a transação. Tente novamente.'),
   })
 
   return (
@@ -149,7 +152,7 @@ export default function CaixaPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{t.categoria || '—'}</td>
                     <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{t.user?.nome ?? '—'}</td>
-                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{formatDateTime(t.data)}</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{formatDateTimeLocal(t.data)}</td>
                     <td className={`px-4 py-3 text-right font-bold ${t.tipo === 'entrada' ? 'text-green-600' : 'text-red-600'}`}>
                       {t.tipo === 'entrada' ? '+' : '-'}{formatCurrency(t.valor)}
                     </td>

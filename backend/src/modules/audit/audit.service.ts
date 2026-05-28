@@ -17,6 +17,7 @@ export class AuditService {
     entidadeId?: number;
     dadosAntes?: Record<string, unknown> | null;
     dadosDepois?: Record<string, unknown>;
+    dados?: Record<string, unknown>;
     contexto?: Record<string, unknown>;
     ip?: string;
     userAgent?: string;
@@ -28,6 +29,7 @@ export class AuditService {
       entidadeId: data.entidadeId,
       dadosAntes: (data.dadosAntes ?? Prisma.JsonNull) as Prisma.InputJsonValue,
       dadosDepois: (data.dadosDepois ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+      dados: (data.dados ?? Prisma.JsonNull) as Prisma.InputJsonValue,
       contexto: (data.contexto ?? Prisma.JsonNull) as Prisma.InputJsonValue,
       ip: data.ip,
       userAgent: data.userAgent,

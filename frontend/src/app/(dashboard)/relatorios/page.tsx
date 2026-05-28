@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BarChart2, RefreshCw, TrendingUp, Users, FileText, FileDown, DollarSign } from 'lucide-react'
 import {
@@ -18,13 +18,22 @@ import api from '@/lib/api'
 
 type ReportTab = 'carteira' | 'faturamento' | 'clientes' | 'movimentacao' | 'contratos'
 
-interface FaturamentoItem {
+interface FaturamentoConsultor {
   consultorId: number | null
   consultorNome: string
   totalRecebido: number
   faturamentoBruto: number
   recuperacaoCapital: number
   quantidadeParcelas: number
+}
+
+interface FaturamentoResponse {
+  mes: string
+  totalRecebido: number
+  faturamentoBruto: number
+  recuperacaoCapital: number
+  quantidadeParcelas: number
+  porConsultor: FaturamentoConsultor[]
 }
 
 export default function RelatoriosPage() {
@@ -51,7 +60,7 @@ export default function RelatoriosPage() {
 
   const { data: faturData, isLoading: loadingFatur, refetch: refetchFatur } = useQuery({
     queryKey: ['reports', 'faturamento', faturMes],
-    queryFn: () => api.get<FaturamentoItem[]>('/reports/faturamento', { params: { mes: faturMes } }).then((r) => r.data),
+    queryFn: () => api.get<FaturamentoResponse>('/reports/faturamento', { params: { mes: faturMes } }).then((r) => r.data),
     enabled: tab === 'faturamento',
   })
 
@@ -73,15 +82,21 @@ export default function RelatoriosPage() {
     enabled: tab === 'contratos',
   })
 
-  async function exportarExcel(endpoint: string, filename: string) {
+  async function exportarBlob(endpoint: string, filename: string, mimeType: string) {
     const res = await api.get(endpoint, { responseType: 'blob' })
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([res.data as BlobPart], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    }))
+    a.href = URL.createObjectURL(new Blob([res.data as BlobPart], { type: mimeType }))
     a.download = filename
     a.click()
     URL.revokeObjectURL(a.href)
+  }
+
+  function exportarExcel(endpoint: string, filename: string) {
+    return exportarBlob(endpoint, filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  }
+
+  function exportarPdf(endpoint: string, filename: string) {
+    return exportarBlob(endpoint, filename, 'application/pdf')
   }
 
   const tabs: { key: ReportTab; label: string; icon: React.ElementType }[] = [
@@ -92,18 +107,7 @@ export default function RelatoriosPage() {
     { key: 'contratos', label: 'Contratos', icon: FileText },
   ]
 
-  // Totais do faturamento (somados sobre todos os consultores)
-  const faturTotais = faturData
-    ? faturData.reduce(
-        (acc, row) => ({
-          totalRecebido: acc.totalRecebido + (row.totalRecebido ?? 0),
-          faturamentoBruto: acc.faturamentoBruto + (row.faturamentoBruto ?? 0),
-          recuperacaoCapital: acc.recuperacaoCapital + (row.recuperacaoCapital ?? 0),
-          quantidadeParcelas: acc.quantidadeParcelas + (row.quantidadeParcelas ?? 0),
-        }),
-        { totalRecebido: 0, faturamentoBruto: 0, recuperacaoCapital: 0, quantidadeParcelas: 0 }
-      )
-    : null
+  const faturTotais = faturData ?? null
 
   return (
     <div className="space-y-6">
@@ -126,6 +130,12 @@ export default function RelatoriosPage() {
 
       {tab === 'carteira' && (
         <div className="space-y-4">
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" className="gap-1.5"
+              onClick={() => exportarPdf('/export/carteira', `carteira-${new Date().toISOString().slice(0,10)}.pdf`)}>
+              <FileDown className="size-3.5" />Exportar PDF
+            </Button>
+          </div>
           {loadingCarteira ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
@@ -215,25 +225,25 @@ export default function RelatoriosPage() {
                 <Card className="bg-blue-50 dark:bg-blue-950/20">
                   <CardContent className="pt-4">
                     <p className="text-xs text-muted-foreground">Total Recebido</p>
-                    <p className="text-xl font-bold mt-1 text-blue-700">{formatCurrency(faturTotais.totalRecebido)}</p>
+                    <p className="text-xl font-bold mt-1 text-blue-700">{formatCurrency(Number(faturTotais.totalRecebido))}</p>
                     <p className="text-xs text-muted-foreground mt-1">{faturTotais.quantidadeParcelas} parcela{faturTotais.quantidadeParcelas !== 1 ? 's' : ''} pagas</p>
                   </CardContent>
                 </Card>
                 <Card className="bg-orange-50 dark:bg-orange-950/20">
                   <CardContent className="pt-4">
                     <p className="text-xs text-muted-foreground">Faturamento Bruto (Lucro)</p>
-                    <p className="text-xl font-bold mt-1 text-orange-600">{formatCurrency(faturTotais.faturamentoBruto)}</p>
+                    <p className="text-xl font-bold mt-1 text-orange-600">{formatCurrency(Number(faturTotais.faturamentoBruto))}</p>
                   </CardContent>
                 </Card>
                 <Card className="bg-green-50 dark:bg-green-950/20">
                   <CardContent className="pt-4">
                     <p className="text-xs text-muted-foreground">Recuperação de Capital</p>
-                    <p className="text-xl font-bold mt-1 text-green-700">{formatCurrency(faturTotais.recuperacaoCapital)}</p>
+                    <p className="text-xl font-bold mt-1 text-green-700">{formatCurrency(Number(faturTotais.recuperacaoCapital))}</p>
                   </CardContent>
                 </Card>
               </div>
 
-              {faturData && faturData.length > 0 && (
+              {faturData?.porConsultor && faturData.porConsultor.length > 0 && (
                 <Card>
                   <CardHeader><CardTitle className="text-base">Faturamento por Consultor</CardTitle></CardHeader>
                   <CardContent className="p-0">
@@ -248,13 +258,13 @@ export default function RelatoriosPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {faturData.map((row, idx) => (
+                        {faturData.porConsultor.map((row, idx) => (
                           <tr key={row.consultorId ?? idx} className="border-b border-border hover:bg-muted/20">
-                            <td className="px-4 py-2.5 font-medium">{row.consultorNome ?? 'Sem consultor'}</td>
+                            <td className="px-4 py-2.5 font-medium">{row.consultorNome}</td>
                             <td className="px-4 py-2.5 text-center text-muted-foreground hidden sm:table-cell">{row.quantidadeParcelas}</td>
-                            <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(row.totalRecebido)}</td>
-                            <td className="px-4 py-2.5 text-right text-orange-600 hidden md:table-cell">{formatCurrency(row.faturamentoBruto)}</td>
-                            <td className="px-4 py-2.5 text-right text-green-700 hidden md:table-cell">{formatCurrency(row.recuperacaoCapital)}</td>
+                            <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(Number(row.totalRecebido))}</td>
+                            <td className="px-4 py-2.5 text-right text-orange-600 hidden md:table-cell">{formatCurrency(Number(row.faturamentoBruto))}</td>
+                            <td className="px-4 py-2.5 text-right text-green-700 hidden md:table-cell">{formatCurrency(Number(row.recuperacaoCapital))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -262,9 +272,9 @@ export default function RelatoriosPage() {
                         <tr className="border-t-2 border-border bg-muted/30">
                           <td className="px-4 py-2.5 font-semibold">Total</td>
                           <td className="px-4 py-2.5 text-center font-semibold hidden sm:table-cell">{faturTotais.quantidadeParcelas}</td>
-                          <td className="px-4 py-2.5 text-right font-bold">{formatCurrency(faturTotais.totalRecebido)}</td>
-                          <td className="px-4 py-2.5 text-right font-bold text-orange-600 hidden md:table-cell">{formatCurrency(faturTotais.faturamentoBruto)}</td>
-                          <td className="px-4 py-2.5 text-right font-bold text-green-700 hidden md:table-cell">{formatCurrency(faturTotais.recuperacaoCapital)}</td>
+                          <td className="px-4 py-2.5 text-right font-bold">{formatCurrency(Number(faturTotais.totalRecebido))}</td>
+                          <td className="px-4 py-2.5 text-right font-bold text-orange-600 hidden md:table-cell">{formatCurrency(Number(faturTotais.faturamentoBruto))}</td>
+                          <td className="px-4 py-2.5 text-right font-bold text-green-700 hidden md:table-cell">{formatCurrency(Number(faturTotais.recuperacaoCapital))}</td>
                         </tr>
                       </tfoot>
                     </table>

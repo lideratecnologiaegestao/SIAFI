@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Plus, Search, RefreshCw, Eye, Pencil, Trash2, Users, UserCheck, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,11 +24,11 @@ interface Consultor {
 interface Client {
   id: number
   nome: string
-  cpf: string
-  whatsapp: string
-  email: string
-  cidade: string
-  estado: string
+  cpf: string | null
+  whatsapp: string | null
+  email: string | null
+  cidade: string | null
+  estado: string | null
   active: boolean
   createdAt: string
   portalAtivo: boolean
@@ -42,14 +43,26 @@ interface ClientsResponse {
   lastPage: number
 }
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
+
 export default function ClientesPage() {
   const { user } = useAuth()
-  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [vincularClient, setVincularClient] = useState<Client | null>(null)
   const [selectedConsultorId, setSelectedConsultorId] = useState<string>('')
   const qc = useQueryClient()
+
+  const search = useDebounce(searchInput, 400)
+  useEffect(() => { setPage(1) }, [search, status])
 
   const canManage = user?.role === 'admin' || user?.role === 'financeiro'
 
@@ -69,7 +82,11 @@ export default function ClientesPage() {
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => api.delete(`/clients/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['clients'] }),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['clients'] })
+      toast.success(`Cliente desativado com sucesso`)
+    },
+    onError: () => toast.error('Não foi possível desativar o cliente. Tente novamente.'),
   })
 
   const vincularMut = useMutation({
@@ -79,7 +96,9 @@ export default function ClientesPage() {
       qc.invalidateQueries({ queryKey: ['clients'] })
       setVincularClient(null)
       setSelectedConsultorId('')
+      toast.success('Consultor vinculado com sucesso')
     },
+    onError: () => toast.error('Não foi possível vincular o consultor. Tente novamente.'),
   })
 
   function handleDelete(id: number, nome: string) {
@@ -99,9 +118,11 @@ export default function ClientesPage() {
           <h1 className="text-2xl font-bold tracking-tight">Clientes</h1>
           <p className="text-muted-foreground text-sm mt-1">Gestão de clientes cadastrados</p>
         </div>
-        <Link href="/clientes/novo">
-          <Button className="gap-2"><Plus className="size-4" />Novo Cliente</Button>
-        </Link>
+        {canManage && (
+          <Link href="/clientes/novo">
+            <Button className="gap-2"><Plus className="size-4" />Novo Cliente</Button>
+          </Link>
+        )}
       </div>
 
       <Card>
@@ -111,12 +132,12 @@ export default function ClientesPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar por nome, CPF ou WhatsApp..."
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
-            <Select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }} className="w-40">
+            <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-40">
               <option value="">Todos</option>
               <option value="ativo">Ativos</option>
               <option value="inativo">Inativos</option>
@@ -139,7 +160,18 @@ export default function ClientesPage() {
           ) : !data?.data.length ? (
             <div className="p-8 text-center">
               <Users className="size-10 mx-auto text-muted-foreground mb-3" />
-              <p className="text-muted-foreground text-sm">Nenhum cliente encontrado.</p>
+              <p className="text-muted-foreground text-sm font-medium">
+                {searchInput || status ? 'Nenhum resultado para o filtro aplicado.' : 'Nenhum cliente cadastrado ainda.'}
+              </p>
+              {(searchInput || status) ? (
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => { setSearchInput(''); setStatus('') }}>
+                  Limpar filtros
+                </Button>
+              ) : canManage ? (
+                <Link href="/clientes/novo">
+                  <Button size="sm" className="mt-3 gap-1"><Plus className="size-3.5" />Novo cliente</Button>
+                </Link>
+              ) : null}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -160,8 +192,14 @@ export default function ClientesPage() {
                   {data.data.map((c) => (
                     <tr key={c.id} className="border-b border-border hover:bg-muted/20 transition-colors">
                       <td className="px-4 py-3 font-medium">{c.nome}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{formatCPF(c.cpf)}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{c.whatsapp ? formatPhone(c.whatsapp) : '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                        {c.cpf
+                          ? formatCPF(c.cpf)
+                          : <Badge variant="outline" className="text-xs font-normal">Não informado</Badge>}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
+                        {c.whatsapp ? formatPhone(c.whatsapp) : <span className="text-xs text-muted-foreground italic">Sem WhatsApp</span>}
+                      </td>
                       <td className="px-4 py-3 hidden xl:table-cell">
                         {c.consultor ? (
                           <span className="text-sm">{c.consultor.nome}</span>
@@ -173,7 +211,7 @@ export default function ClientesPage() {
                             <UserCheck className="size-3" />Vincular
                           </button>
                         ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
+                          <span className="text-muted-foreground text-xs italic">Sem consultor</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{formatDate(c.createdAt)}</td>
@@ -182,8 +220,7 @@ export default function ClientesPage() {
                           ? <Badge variant="success">Ativo</Badge>
                           : c.supabaseId
                             ? <Badge variant="secondary">Desativado</Badge>
-                            : <span className="text-muted-foreground text-xs">—</span>
-                        }
+                            : <span className="text-muted-foreground text-xs italic">Inativo</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge variant={c.active ? 'success' : 'outline'}>
@@ -195,17 +232,21 @@ export default function ClientesPage() {
                           <Link href={`/clientes/${c.id}`}>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Eye className="size-3.5" /></Button>
                           </Link>
-                          <Link href={`/clientes/${c.id}/editar`}>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Pencil className="size-3.5" /></Button>
-                          </Link>
-                          <Button
-                            variant="ghost" size="sm"
-                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(c.id, c.nome)}
-                            disabled={deleteMut.isPending}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
+                          {canManage && (
+                            <Link href={`/clientes/${c.id}/editar`}>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Pencil className="size-3.5" /></Button>
+                            </Link>
+                          )}
+                          {canManage && (
+                            <Button
+                              variant="ghost" size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              onClick={() => handleDelete(c.id, c.nome)}
+                              disabled={deleteMut.isPending}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -215,18 +256,19 @@ export default function ClientesPage() {
             </div>
           )}
 
-          {data && data.lastPage > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+          {data && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border flex-wrap gap-2">
               <p className="text-sm text-muted-foreground">
-                {data.total} cliente{data.total !== 1 ? 's' : ''} encontrado{data.total !== 1 ? 's' : ''}
+                {data.total} cliente{data.total !== 1 ? 's' : ''}
+                {status === 'ativo' ? ' ativos' : status === 'inativo' ? ' inativos' : ''}
               </p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Anterior</Button>
-                <span className="flex items-center text-sm text-muted-foreground px-2">
-                  {page} / {data.lastPage}
-                </span>
-                <Button variant="outline" size="sm" disabled={page === data.lastPage} onClick={() => setPage((p) => p + 1)}>Próximo</Button>
-              </div>
+              {data.lastPage > 1 && (
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Anterior</Button>
+                  <span className="flex items-center text-sm text-muted-foreground px-2">{page} / {data.lastPage}</span>
+                  <Button variant="outline" size="sm" disabled={page === data.lastPage} onClick={() => setPage((p) => p + 1)}>Próximo</Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -237,8 +279,8 @@ export default function ClientesPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-base">Vincular Consultor</h2>
-              <button onClick={() => setVincularClient(null)}>
-                <X className="size-4 text-muted-foreground hover:text-foreground" />
+              <button onClick={() => setVincularClient(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-4" />
               </button>
             </div>
             <p className="text-sm text-muted-foreground">
@@ -246,11 +288,7 @@ export default function ClientesPage() {
             </p>
             <div className="space-y-1.5">
               <Label>Consultor</Label>
-              <Select
-                value={selectedConsultorId}
-                onChange={(e) => setSelectedConsultorId(e.target.value)}
-                className="w-full"
-              >
+              <Select value={selectedConsultorId} onChange={(e) => setSelectedConsultorId(e.target.value)} className="w-full">
                 <option value="">Sem consultor</option>
                 {consultores?.map((c) => (
                   <option key={c.id} value={String(c.id)}>{c.nome}</option>

@@ -56,7 +56,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
       const redirect = getRedirectParam()
-      router.replace(user?.role === 'cliente' ? (redirect ?? '/portal') : '/dashboard')
+      router.replace(user?.role === 'cliente' ? (redirect ?? '/portal') : (redirect ?? '/dashboard'))
     }
   }, [isAuthenticated, isLoading, user, router])
 
@@ -80,7 +80,7 @@ export default function LoginPage() {
       } else if (result.role === 'cliente') {
         router.replace(redirect ?? '/portal')
       } else {
-        router.replace('/dashboard')
+        router.replace(redirect ?? '/dashboard')
       }
     } catch {
       setServerError('Usuário ou senha inválidos.')

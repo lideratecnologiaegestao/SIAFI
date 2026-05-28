@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Lock, Unlock, AlertTriangle, CheckCircle, KeyRound, X, ShieldCheck, ShieldOff } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuth } from '@/contexts/auth.context'
+import { formatDateTimeLocal } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,12 +32,9 @@ interface PortalCardProps {
   clienteEmail: string | null
 }
 
-function formatDate(s: string | null) {
+function fmtDate(s: string | null) {
   if (!s) return '—'
-  return new Date(s).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+  return formatDateTimeLocal(s)
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -182,11 +180,11 @@ export function PortalCard({ clientId, clienteNome, clienteEmail }: PortalCardPr
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">Ativado em</p>
-                <p className="font-medium">{formatDate(s.portalAtivadoEm)}</p>
+                <p className="font-medium">{fmtDate(s.portalAtivadoEm)}</p>
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">Último acesso</p>
-                <p className="font-medium">{formatDate(s.ultimoAcessoPortal)}</p>
+                <p className="font-medium">{fmtDate(s.ultimoAcessoPortal)}</p>
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">MFA</p>

@@ -1,14 +1,15 @@
 'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
+import { LogoEmpresa } from '@/components/logo-empresa'
+import { useTema } from '@/hooks/use-tema'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, CreditCard, Receipt, Wallet,
-  ArrowLeftRight, Settings, Shield, LogOut, X, ChevronRight,
+  ArrowLeftRight, Settings, Shield, ShieldCheck, LogOut, X, ChevronRight,
   AlertCircle, RefreshCcw, QrCode, BarChart2, Bell, MessageSquare,
   UserCog, ListChecks, Briefcase, ClipboardList, TrendingUp, Phone,
-  Banknote, Search, Mail,
+  Banknote, Search, Mail, Info, HelpCircle, Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth.context'
@@ -176,10 +177,22 @@ const navGroups: NavGroup[] = [
     title: 'Administração',
     roles: ['admin'],
     items: [
-      { label: 'Usuários',           href: '/usuarios',               icon: UserCog },
-      { label: 'Configurações',      href: '/configuracoes',          icon: Settings },
-      { label: 'Templates de Email', href: '/configuracoes/emails',   icon: Mail },
-      { label: 'Auditoria',          href: '/auditoria',              icon: Shield },
+      { label: 'Usuários',                href: '/usuarios',                 icon: UserCog },
+      { label: 'Configurações',          href: '/configuracoes',            icon: Settings },
+      { label: 'Empresa / Identidade',   href: '/configuracoes/empresa',    icon: Building2 },
+      { label: 'Templates de Email',     href: '/configuracoes/emails',     icon: Mail },
+      { label: 'LGPD / Privacidade',     href: '/lgpd',                     icon: ShieldCheck },
+      { label: 'Auditoria',              href: '/auditoria',                icon: Shield },
+      { label: 'Documentação',           href: '/documentacao',             icon: Info },
+    ],
+  },
+
+  // ── Sistema (todos os perfis internos) ───────────────────────────────────
+  {
+    title: 'Sistema',
+    items: [
+      { label: 'Ajuda / Manual',  href: '/ajuda', icon: HelpCircle },
+      { label: 'Sobre o SIAFI',   href: '/sobre',  icon: Info },
     ],
   },
 ]
@@ -193,6 +206,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { user, logout } = useAuth()
   const unreadCount = useUnreadCount()
+  const { data: tema } = useTema()
+  const corPrimaria = tema?.corPrimaria ?? '#185FA5'
 
   const visibleGroups = navGroups
     .filter((group) => !group.roles || (user && group.roles.includes(user.role)))
@@ -234,20 +249,22 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
         style={{ backgroundColor: '#0f172a' }}
       >
-        <div className="flex h-16 items-center justify-between px-4 border-b border-white/10">
-          <div className="bg-white rounded-lg px-3 py-1.5 flex items-center">
-            <Image
-              src="/logo.png"
-              alt="SIAFI"
-              width={130}
-              height={36}
-              className="object-contain h-8 w-auto"
-              priority
-            />
+        <div
+          className="flex h-16 items-center justify-between px-4 border-b border-white/10"
+          style={{ backgroundColor: corPrimaria }}
+        >
+          <div className="flex items-center min-w-0">
+            {tema?.logoUrl ? (
+              <div className="bg-white rounded-md px-2 py-1 flex items-center">
+                <LogoEmpresa altura={30} fallbackTexto={false} />
+              </div>
+            ) : (
+              <LogoEmpresa altura={32} fallbackTexto={true} />
+            )}
           </div>
           <button
             onClick={onClose}
-            className="lg:hidden text-slate-400 hover:text-white transition-colors"
+            className="lg:hidden text-white/70 hover:text-white transition-colors ml-2 shrink-0"
             aria-label="Fechar menu"
           >
             <X className="size-5" />
@@ -272,9 +289,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                     className={cn(
                       'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150',
                       active
-                        ? 'bg-blue-600 text-white'
+                        ? 'text-white'
                         : 'text-slate-400 hover:bg-white/8 hover:text-slate-200'
                     )}
+                    style={active ? { backgroundColor: corPrimaria } : undefined}
                   >
                     <Icon className="size-4 shrink-0" />
                     <span className="flex-1">{item.label}</span>
@@ -293,8 +311,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         <div className="border-t border-white/10 p-4">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0">
-              <span className="text-blue-400 text-xs font-semibold">
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 border"
+              style={{
+                backgroundColor: `${corPrimaria}22`,
+                borderColor: `${corPrimaria}55`,
+              }}
+            >
+              <span className="text-xs font-semibold" style={{ color: corPrimaria }}>
                 {user ? getInitials(user.nome) : '?'}
               </span>
             </div>

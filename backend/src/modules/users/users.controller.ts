@@ -16,6 +16,13 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  // Retorna apenas id+nome dos admins — acessível a qualquer perfil interno para o fluxo de suporte
+  @Get('admins')
+  @Roles('admin', 'financeiro', 'consultor', 'caixa')
+  findAdmins() {
+    return this.usersService.findByRole('admin');
+  }
+
   @Post()
   @Roles('admin')
   create(@Body() dto: CreateUserDto) {

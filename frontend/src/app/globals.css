@@ -81,12 +81,23 @@
   --radius: 0.625rem;
   --sidebar: #0f172a;
   --sidebar-foreground: #94a3b8;
-  --sidebar-primary: #3b82f6;
+  --sidebar-primary: #185FA5;
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(1 0 0 / 8%);
   --sidebar-accent-foreground: #e2e8f0;
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: #3b82f6;
+  --sidebar-ring: #185FA5;
+
+  /* ── Cores da empresa (fallback até TemaProvider carregar) ── */
+  --cor-primaria:       #185FA5;
+  --cor-secundaria:     #0F6E56;
+  --cor-acento:         #854F0B;
+  --cor-texto:          #1a1a18;
+  --cor-fundo:          #f5f5f3;
+  --cor-primaria-hover: #0d4a8a;
+  --cor-primaria-light: #e6f1fb;
+  --cor-primaria-sutil: rgba(24, 95, 165, 0.10);
+  --cor-primaria-borda: rgba(24, 95, 165, 0.30);
 }
 
 .dark {

@@ -1,0 +1,74 @@
+/* Portal Design System — CSS Variables & Utilities */
+:root {
+  --portal-blue-900: #0A1628;
+  --portal-blue-800: #0D2040;
+  --portal-blue-600: #1B4FD8;
+  --portal-blue-400: #4B8EF5;
+  --portal-blue-100: #EFF5FF;
+
+  --portal-green-600: #059669;
+  --portal-green-400: #34D399;
+  --portal-green-100: #ECFDF5;
+
+  --portal-amber-600: #D97706;
+  --portal-amber-100: #FFFBEB;
+
+  --portal-red-600: #DC2626;
+  --portal-red-100: #FEF2F2;
+
+  --portal-gray-950: #09090B;
+  --portal-gray-800: #1C1C1E;
+  --portal-gray-600: #52525B;
+  --portal-gray-300: #D4D4D8;
+  --portal-gray-100: #F4F4F5;
+  --portal-white:    #FFFFFF;
+
+  --portal-shadow-card:    0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.08);
+  --portal-shadow-elevated: 0 4px 24px rgba(0,0,0,.14);
+  --portal-radius-card: 12px;
+  --portal-radius-sm:    8px;
+}
+
+/* Font utility classes — paired with next/font CSS variables */
+.font-portal-display {
+  font-family: var(--font-dm-serif, 'Georgia', serif);
+}
+.font-portal-sans {
+  font-family: var(--font-dm-sans, 'Arial', sans-serif);
+}
+.font-portal-mono {
+  font-family: var(--font-jetbrains, 'Courier New', monospace);
+}
+
+/* Base card */
+.pcard {
+  background: var(--portal-white);
+  border-radius: var(--portal-radius-card);
+  box-shadow: var(--portal-shadow-card);
+  overflow: hidden;
+}
+
+.pcard-clickable {
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.pcard-clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--portal-shadow-elevated);
+}
+.pcard-clickable:active {
+  transform: scale(0.98);
+}
+
+/* Status dot pulsante para status ativo */
+.status-dot-active {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Shimmer skeleton */
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #F4F4F5 25%, #E4E4E7 50%, #F4F4F5 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.5s linear infinite;
+  border-radius: 6px;
+}

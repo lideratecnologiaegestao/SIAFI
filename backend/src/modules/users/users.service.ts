@@ -37,6 +37,14 @@ export class UsersService {
     return users.map(({ password: _, ...u }) => u);
   }
 
+  async findByRole(role: string): Promise<{ id: number; nome: string }[]> {
+    return this.prisma.user.findMany({
+      where: { role: role as any, active: true },
+      select: { id: true, nome: true },
+      orderBy: { nome: 'asc' },
+    });
+  }
+
   async create(dto: CreateUserDto): Promise<Omit<User, 'password'>> {
     const existing = await this.prisma.user.findUnique({ where: { username: dto.username } });
     if (existing) throw new ConflictException('Username já está em uso');

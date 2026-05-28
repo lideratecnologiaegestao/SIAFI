@@ -40,3 +40,6 @@ export const JOB_WA_ACEITE_CONTRATO     = 'whatsapp.aceite-contrato';
 // Job names — capital liberado
 export const JOB_EMAIL_CAPITAL_LIBERADO = 'email.capital-liberado';
 export const JOB_WA_CAPITAL_LIBERADO    = 'whatsapp.capital-liberado';
+
+// Job names — LGPD
+export const JOB_LGPD_EXPORTAR_DADOS = 'lgpd.exportar-dados';

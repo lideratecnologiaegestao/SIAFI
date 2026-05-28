@@ -52,7 +52,7 @@ export class LoansService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          client: { select: { id: true, nome: true, nomeSocial: true } },
+          client: { select: { id: true, nome: true, nomeSocial: true, cpf: true } },
         },
       }),
       this.prisma.loan.count({ where }),
@@ -80,7 +80,16 @@ export class LoansService {
           },
         },
         consultor: { select: { id: true, nome: true } },
-        installments: { orderBy: { numero: 'asc' } },
+        installments: {
+          include: {
+            payments: { orderBy: { dataPagamento: 'desc' } },
+            pixPayments: { orderBy: { createdAt: 'desc' } },
+            mpPayments: { orderBy: { createdAt: 'desc' } },
+          },
+          orderBy: { numero: 'asc' },
+        },
+        renegociacoes: { orderBy: { createdAt: 'desc' } },
+        notifications: { orderBy: { createdAt: 'desc' }, take: 50 },
       },
     });
 
