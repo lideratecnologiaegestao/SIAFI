@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
+import { ComboboxTexto } from '@/components/ui/combobox-texto'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn, formatCurrency, formatDate, formatCPF, METODO_PAGAMENTO, hojeISODate } from '@/lib/utils'
@@ -73,6 +74,13 @@ export default function NovoPagamentoPage() {
       dataPagamento:   hojeISODate(),
       metodoPagamento: 'dinheiro',
     },
+  })
+
+  // Contas/bancos já usados — sugestões do campo "Bco Recebedor"
+  const { data: contasUsadas } = useQuery<string[]>({
+    queryKey: ['payments-contas'],
+    queryFn: () => api.get<string[]>('/payments/contas').then(r => r.data),
+    staleTime: 60_000,
   })
 
   // ── Step 1: all clients ────────────────────────────────────────────────────
@@ -134,9 +142,16 @@ export default function NovoPagamentoPage() {
     ? new Date(overdueCheck) < new Date(new Date().toDateString())
     : false
 
+  // A mora corre por dia, então o total depende da data da baixa, não de hoje.
+  // Sem enviar a data, a tela mostrava a dívida de hoje e o backend recusava a
+  // baixa retroativa por "excede o total devido".
+  const dataPagamentoSel = form.watch('dataPagamento')
+
   const { data: encargos } = useQuery<Encargos>({
-    queryKey: ['encargos', instIdForEncargos],
-    queryFn:  () => api.get<Encargos>(`/installments/${instIdForEncargos}/encargos`).then(r => r.data),
+    queryKey: ['encargos', instIdForEncargos, dataPagamentoSel],
+    queryFn:  () => api.get<Encargos>(`/installments/${instIdForEncargos}/encargos`, {
+      params: { data: dataPagamentoSel || undefined },
+    }).then(r => r.data),
     enabled:  !!instIdForEncargos && step === 3 && isOverdueInst,
     staleTime: 30_000,
   })
@@ -480,7 +495,12 @@ export default function NovoPagamentoPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Bco Recebedor</Label>
-                  <Input {...form.register('contaDestino')} placeholder="ex: Itaú PJ, dinheiro em caixa" />
+                  <ComboboxTexto
+                    value={form.watch('contaDestino') ?? ''}
+                    onChange={(v) => form.setValue('contaDestino', v, { shouldDirty: true })}
+                    opcoes={contasUsadas}
+                    placeholder="ex: Itaú PJ, dinheiro em caixa"
+                  />
                   <p className="text-[10px] text-muted-foreground">Conta/banco que recebeu o valor</p>
                 </div>
 

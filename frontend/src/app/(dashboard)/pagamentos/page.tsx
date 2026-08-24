@@ -3,11 +3,13 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Search, RefreshCw, Wallet, Undo2, FileDown, Calendar } from 'lucide-react'
+import { Plus, Search, RefreshCw, Wallet, Undo2, FileDown, Calendar, Landmark, Percent, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ClienteCombobox } from '@/components/ui/cliente-combobox'
+import { ComboboxTexto } from '@/components/ui/combobox-texto'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
@@ -64,6 +66,10 @@ export default function PagamentosPage() {
   const [startDate, setStartDate] = useState(firstOfMonth)
   const [endDate, setEndDate] = useState(today)
   const [consultorId, setConsultorId] = useState('')
+  const [contaInput, setContaInput] = useState('')
+  // Percentual digitado na tela: simula sem gravar nada. Vazio = usa o do contrato/baixa.
+  const [simConsultor, setSimConsultor] = useState('')
+  const [simAdmin, setSimAdmin] = useState('')
   const [page, setPage] = useState(1)
   const qc = useQueryClient()
   const { user } = useAuth()
@@ -71,10 +77,13 @@ export default function PagamentosPage() {
   const showSplit = user?.role !== 'caixa'
 
   const search = useDebounce(searchInput, 400)
-  useEffect(() => { setPage(1) }, [search, startDate, endDate, consultorId])
+  const contaDestino = useDebounce(contaInput, 400)
+  const simComissao = useDebounce(simConsultor, 400)
+  const simComissaoAdmin = useDebounce(simAdmin, 400)
+  useEffect(() => { setPage(1) }, [search, startDate, endDate, consultorId, contaDestino])
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['payments', { search, startDate, endDate, consultorId, page }],
+    queryKey: ['payments', { search, startDate, endDate, consultorId, contaDestino, simComissao, simComissaoAdmin, page }],
     queryFn: () =>
       api.get<PaymentsResponse>('/payments', {
         params: {
@@ -82,6 +91,9 @@ export default function PagamentosPage() {
           startDate: startDate || undefined,
           endDate: endDate || undefined,
           consultorId: consultorId ? Number(consultorId) : undefined,
+          contaDestino: contaDestino || undefined,
+          simComissaoPercentual: simComissao !== '' ? Number(simComissao) : undefined,
+          simComissaoAdministradorPercentual: simComissaoAdmin !== '' ? Number(simComissaoAdmin) : undefined,
           page,
           limit: 20,
         },
@@ -96,6 +108,36 @@ export default function PagamentosPage() {
     queryKey: ['consultores'],
     queryFn: () => api.get<{id: number; nome: string}[]>('/clients/consultores').then((r) => r.data),
     enabled: user?.role === 'admin' || user?.role === 'financeiro',
+  })
+
+  const { data: contas } = useQuery<string[]>({
+    queryKey: ['payments-contas'],
+    queryFn: () => api.get<string[]>('/payments/contas').then((r) => r.data),
+  })
+
+  // Percentuais padrao da casa (Configuracoes). So admin le /settings.
+  const podeSalvarPadrao = user?.role === 'admin'
+  const { data: settings } = useQuery<{ chave: string; valor: string }[]>({
+    queryKey: ['settings'],
+    queryFn: () => api.get<{ chave: string; valor: string }[]>('/settings').then((r) => r.data),
+    enabled: podeSalvarPadrao,
+  })
+  const padraoConsultor = settings?.find((x) => x.chave === 'financeiro.comissao_consultor_percentual')?.valor ?? ''
+  const padraoAdmin = settings?.find((x) => x.chave === 'financeiro.comissao_administrador_percentual')?.valor ?? ''
+
+  const padraoMut = useMutation({
+    mutationFn: () =>
+      api.patch('/settings', {
+        entries: [
+          { chave: 'financeiro.comissao_consultor_percentual', valor: simConsultor },
+          { chave: 'financeiro.comissao_administrador_percentual', valor: simAdmin },
+        ].filter((e) => e.valor !== ''),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      toast.success('Percentuais salvos como padrão. Valem para as próximas baixas.')
+    },
+    onError: () => toast.error('Não foi possível salvar os percentuais padrão.'),
   })
 
   const estornoMut = useMutation({
@@ -148,15 +190,27 @@ export default function PagamentosPage() {
               />
             </div>
             {consultores && (
-              <select
-                value={consultorId}
-                onChange={(e) => setConsultorId(e.target.value)}
-                className="flex h-9 w-40 items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">Consultor (Todos)</option>
-                {consultores.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-              </select>
+              <div className="w-full sm:w-[200px] shrink-0">
+                <ClienteCombobox
+                  clientes={consultores}
+                  value={consultorId ? Number(consultorId) : null}
+                  onSelect={(c) => setConsultorId(c ? String(c.id) : '')}
+                  placeholder="Consultor..."
+                  avulsoLabel="Todos os consultores"
+                  vazioLabel="Nenhum consultor encontrado."
+                />
+              </div>
             )}
+            <div className="relative w-44">
+              <Landmark className="absolute left-3 top-[18px] -translate-y-1/2 size-4 text-muted-foreground z-10" />
+              <ComboboxTexto
+                value={contaInput}
+                onChange={setContaInput}
+                opcoes={contas}
+                placeholder="Bco Recebedor"
+                inputClassName="pl-9 text-sm"
+              />
+            </div>
             <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground whitespace-nowrap">De</Label>
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-36 text-sm" />
@@ -169,6 +223,64 @@ export default function PagamentosPage() {
               <RefreshCw className="size-3.5" />Atualizar
             </Button>
           </div>
+          {showSplit && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <Percent className="size-4 text-muted-foreground" />
+                <span className="text-xs font-medium">Comissão sobre o Lucro Geral</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="sim-consultor" className="text-xs text-muted-foreground whitespace-nowrap">Consultor %</Label>
+                <Input
+                  id="sim-consultor"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={simConsultor}
+                  onChange={(e) => setSimConsultor(e.target.value)}
+                  placeholder={padraoConsultor || 'contrato'}
+                  className="w-24 text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="sim-admin" className="text-xs text-muted-foreground whitespace-nowrap">Administrador %</Label>
+                <Input
+                  id="sim-admin"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={simAdmin}
+                  onChange={(e) => setSimAdmin(e.target.value)}
+                  placeholder={padraoAdmin || 'contrato'}
+                  className="w-24 text-sm"
+                />
+              </div>
+              {(simConsultor !== '' || simAdmin !== '') && (
+                <Button variant="ghost" size="sm" className="text-xs" onClick={() => { setSimConsultor(''); setSimAdmin('') }}>
+                  Limpar
+                </Button>
+              )}
+              {podeSalvarPadrao && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 text-xs"
+                  onClick={() => padraoMut.mutate()}
+                  disabled={padraoMut.isPending || (simConsultor === '' && simAdmin === '')}
+                >
+                  <Save className="size-3.5" />Salvar como padrão
+                </Button>
+              )}
+              <p className="basis-full text-[11px] text-muted-foreground">
+                Em branco, cada recebimento usa o percentual do próprio contrato. Preenchido, os valores desta tela são recalculados na hora — nada é gravado e o histórico não muda.
+                {podeSalvarPadrao && ' “Salvar como padrão” faz o percentual valer para as próximas baixas dos contratos que não têm o seu.'}
+              </p>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
@@ -186,12 +298,12 @@ export default function PagamentosPage() {
               <p className="text-muted-foreground text-sm font-medium">
                 {searchInput || startDate || endDate ? 'Nenhum pagamento no período.' : 'Nenhum pagamento encontrado.'}
               </p>
-              {(searchInput || startDate !== firstOfMonth || endDate !== today) && (
+              {(searchInput || contaInput || startDate !== firstOfMonth || endDate !== today) && (
                 <Button
                   variant="outline"
                   size="sm"
                   className="mt-3"
-                  onClick={() => { setSearchInput(''); setStartDate(firstOfMonth); setEndDate(today) }}
+                  onClick={() => { setSearchInput(''); setContaInput(''); setStartDate(firstOfMonth); setEndDate(today) }}
                 >
                   Limpar filtros
                 </Button>
@@ -329,17 +441,17 @@ export default function PagamentosPage() {
                 )}
                 {showSplit && (
                   <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400" title="Soma da comissão dos consultores, calculada sobre o Lucro Geral do período filtrado">
-                    Comissão do Consultor: {formatCurrency(totalComissao)}
+                    Comissão do Consultor: {formatCurrency(totalComissao)}{simComissao !== '' && <span className="ml-1 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">simulado</span>}
                   </p>
                 )}
                 {showSplit && (
                   <p className="text-sm font-bold text-violet-700 dark:text-violet-400" title="Soma da comissão dos administradores, calculada sobre o Lucro Geral do período filtrado">
-                    Comissão do Administrador: {formatCurrency(totalComissaoAdministrador)}
+                    Comissão do Administrador: {formatCurrency(totalComissaoAdministrador)}{simComissaoAdmin !== '' && <span className="ml-1 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">simulado</span>}
                   </p>
                 )}
                 {totalLucro > 0 && showSplit && (
                   <p className="text-sm font-medium text-blue-600 dark:text-blue-400" title="Lucro Geral − Comissão do Consultor − Comissão do Administrador">
-                    Lucro Empresa: {formatCurrency(totalLucro)}
+                    Lucro Empresa: {formatCurrency(totalLucro)}{(simComissao !== '' || simComissaoAdmin !== '') && <span className="ml-1 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">simulado</span>}
                   </p>
                 )}
                 {totalDesconto > 0 && (

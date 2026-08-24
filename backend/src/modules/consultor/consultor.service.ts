@@ -6,10 +6,13 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { dataLocal } from '../../common/data';
 import { BAIXA_ORDER, BAIXA_SELECT, realizedLucro } from '../../common/commission';
+import { calcularEncargos } from '../../common/encargos';
 import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 import { CreateSolicitacaoDto, ResponderSolicitacaoDto } from './dto/create-solicitacao.dto';
 import { CreateIntencaoDto, AprovarIntencaoDto } from './dto/create-intencao.dto';
 import { CreateCobrancaDto } from './dto/create-cobranca.dto';
+
+const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class ConsultorService {
@@ -237,6 +240,251 @@ export class ConsultorService {
         installment: { select: { numero: true, installmentAmount: true, dataVencimento: true } },
       },
     });
+  }
+
+  // ─── Relatório geral do cliente (consultor) ──────────────────────────────
+
+  async listarClientesRelatorio(currentUser: RequestUser) {
+    const where: Record<string, unknown> = { active: true };
+    if (currentUser.role === 'consultor') where.consultorId = currentUser.id;
+
+    const clientes = await this.prisma.client.findMany({
+      where,
+      orderBy: { nome: 'asc' },
+      select: { id: true, nome: true, cpf: true },
+    });
+    if (clientes.length === 0) return [];
+
+    // A tela lista a carteira inteira de cara, entao cada linha ja diz se o
+    // cliente tem parcela vencida: e a primeira coisa que o consultor precisa
+    // saber antes de ligar, sem ter que abrir cliente por cliente.
+    const ids = clientes.map((c) => c.id);
+    const loans = await this.prisma.loan.findMany({
+      where: { clientId: { in: ids }, status: { in: ['ativo', 'inadimplente'] } },
+      select: { id: true, clientId: true },
+    });
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const atrasadas = loans.length
+      ? await this.prisma.installment.groupBy({
+          by: ['loanId'],
+          where: {
+            loanId: { in: loans.map((l) => l.id) },
+            status: { in: ['pendente', 'parcialmente_pago', 'atrasado'] },
+            dataVencimento: { lt: hoje },
+          },
+          _count: { _all: true },
+        })
+      : [];
+
+    const clientePorLoan = new Map(loans.map((l) => [l.id, l.clientId]));
+    const contratos = new Map<number, number>();
+    for (const l of loans) contratos.set(l.clientId, (contratos.get(l.clientId) ?? 0) + 1);
+    const emAtraso = new Map<number, number>();
+    for (const g of atrasadas) {
+      const clientId = clientePorLoan.get(g.loanId);
+      if (clientId === undefined) continue;
+      emAtraso.set(clientId, (emAtraso.get(clientId) ?? 0) + g._count._all);
+    }
+
+    return clientes.map((c) => ({
+      ...c,
+      contratosAtivos: contratos.get(c.id) ?? 0,
+      parcelasAtrasadas: emAtraso.get(c.id) ?? 0,
+    }));
+  }
+
+  /**
+   * Visão completa do cliente para o consultor: cada contrato com as parcelas
+   * separadas em pagas / vencidas / a vencer. Consultor só enxerga a própria
+   * carteira; admin e financeiro enxergam qualquer cliente.
+   */
+  async getRelatorioCliente(clientId: number, currentUser: RequestUser) {
+    if (currentUser.role === 'consultor') {
+      await this.assertClientePertenceConsultor(clientId, currentUser.id);
+    }
+
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
+      select: {
+        id: true,
+        nome: true,
+        cpf: true,
+        whatsapp: true,
+        email: true,
+        cidade: true,
+        estado: true,
+        active: true,
+        consultor: { select: { id: true, nome: true } },
+        loans: {
+          orderBy: { dataInicio: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            principalAmount: true,
+            totalReceivable: true,
+            numeroParcelas: true,
+            dataInicio: true,
+            metodoPagamento: true,
+            multaPercentual: true,
+            moraDiariaPercentual: true,
+            installments: {
+              orderBy: { dataVencimento: 'asc' },
+              select: {
+                id: true,
+                numero: true,
+                installmentAmount: true,
+                dataVencimento: true,
+                status: true,
+                totalPago: true,
+                saldoDevedor: true,
+                payments: {
+                  where: { estornado: false },
+                  select: { dataPagamento: true, valorPago: true, estornado: true },
+                  orderBy: { dataPagamento: 'asc' },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) throw new NotFoundException('Cliente não encontrado');
+
+    const [multaS, moraS] = await Promise.all([
+      this.prisma.siteSetting.findUnique({ where: { chave: 'financeiro.multa_atraso_percentual' } }),
+      this.prisma.siteSetting.findUnique({ where: { chave: 'financeiro.mora_dia_percentual' } }),
+    ]);
+    const multaDefault = multaS?.valor ? parseFloat(multaS.valor) : 2.0;
+    const moraDiaDefault = moraS?.valor ? parseFloat(moraS.valor) : 0.0333;
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    const resumo = {
+      totalContratos: 0,
+      totalContratado: 0,
+      totalPago: 0,
+      totalVencido: 0,
+      totalAVencer: 0,
+      qtdPagas: 0,
+      qtdVencidas: 0,
+      qtdAVencer: 0,
+      qtdQuitadasHistorico: 0,
+    };
+
+    const contratos = client.loans.map((loan) => {
+      const multaPerc = loan.multaPercentual != null ? Number(loan.multaPercentual) : multaDefault;
+      const moraDiaPerc =
+        loan.moraDiariaPercentual != null ? Number(loan.moraDiariaPercentual) : moraDiaDefault;
+
+      const pagas: unknown[] = [];
+      const vencidas: unknown[] = [];
+      const aVencer: unknown[] = [];
+
+      let pagoContrato = 0;
+      let vencidoContrato = 0;
+      let aVencerContrato = 0;
+
+      for (const inst of loan.installments) {
+        const enc = calcularEncargos(inst as never, multaPerc, moraDiaPerc, hoje);
+        const venc = new Date(inst.dataVencimento);
+        venc.setHours(0, 0, 0, 0);
+
+        // Installment não guarda data de quitação — a referência é a última baixa viva.
+        const ultimaBaixa = inst.payments.length
+          ? inst.payments[inst.payments.length - 1].dataPagamento
+          : null;
+
+        const base = {
+          id: inst.id,
+          numero: inst.numero,
+          valor: String(inst.installmentAmount),
+          dataVencimento: inst.dataVencimento,
+          dataPagamento: ultimaBaixa,
+          status: inst.status,
+          totalPago: String(inst.totalPago),
+          saldo: enc.saldo,
+          multa: enc.valorMulta,
+          mora: enc.valorMora,
+          totalDevido: enc.totalDevido,
+          diasAtraso: enc.diasAtraso,
+        };
+
+        if (inst.status === 'cancelado') continue;
+
+        if (enc.saldo <= 0.005) {
+          pagas.push(base);
+          pagoContrato += Number(inst.totalPago);
+        } else if (venc < hoje) {
+          vencidas.push(base);
+          vencidoContrato += enc.totalDevido;
+          pagoContrato += Number(inst.totalPago);
+        } else {
+          aVencer.push(base);
+          aVencerContrato += enc.saldo;
+          pagoContrato += Number(inst.totalPago);
+        }
+      }
+
+      // A migracao do legado so trouxe as parcelas EM ABERTO: as ja quitadas no
+      // sistema antigo nao viraram linha nenhuma. Sem isso o relatorio diz "0 pagas"
+      // num contrato de 2021 com metade do carne liquidado - justamente o numero que
+      // o consultor usa na negociacao. O que sobra e a diferenca entre o que o
+      // contrato declara e o que o sistema registra.
+      const quitadasHistorico = Math.max(0, loan.numeroParcelas - loan.installments.length);
+
+      resumo.totalContratos += 1;
+      resumo.totalContratado += Number(loan.totalReceivable);
+      resumo.totalPago += pagoContrato;
+      resumo.totalVencido += vencidoContrato;
+      resumo.totalAVencer += aVencerContrato;
+      resumo.qtdPagas += pagas.length;
+      resumo.qtdVencidas += vencidas.length;
+      resumo.qtdAVencer += aVencer.length;
+      resumo.qtdQuitadasHistorico += quitadasHistorico;
+
+      return {
+        id: loan.id,
+        status: loan.status,
+        principalAmount: String(loan.principalAmount),
+        totalReceivable: String(loan.totalReceivable),
+        numeroParcelas: loan.numeroParcelas,
+        qtdQuitadasHistorico: quitadasHistorico,
+        dataInicio: loan.dataInicio,
+        metodoPagamento: loan.metodoPagamento,
+        totalPago: r2(pagoContrato),
+        totalVencido: r2(vencidoContrato),
+        totalAVencer: r2(aVencerContrato),
+        pagas,
+        vencidas,
+        aVencer,
+      };
+    });
+
+    return {
+      cliente: {
+        id: client.id,
+        nome: client.nome,
+        cpf: client.cpf,
+        whatsapp: client.whatsapp,
+        email: client.email,
+        cidade: client.cidade,
+        estado: client.estado,
+        active: client.active,
+        consultor: client.consultor,
+      },
+      resumo: {
+        ...resumo,
+        totalContratado: r2(resumo.totalContratado),
+        totalPago: r2(resumo.totalPago),
+        totalVencido: r2(resumo.totalVencido),
+        totalAVencer: r2(resumo.totalAVencer),
+      },
+      contratos,
+    };
   }
 
   // ─── Detalhe de cliente da carteira ──────────────────────────────────────

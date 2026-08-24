@@ -37,8 +37,17 @@ export class InstallmentsController {
 
   @Get('overdue')
   @Roles('admin', 'financeiro', 'caixa', 'consultor')
-  findOverdue(@CurrentUser() user: AuthUser, @Query('consultorId') consultorId?: string) {
-    return this.installmentsService.findOverdue(this.escopoConsultor(user, consultorId), user?.role);
+  findOverdue(
+    @CurrentUser() user: AuthUser,
+    @Query('consultorId') consultorId?: string,
+    @Query('clientId') clientId?: string,
+  ) {
+    const cliente = Number(clientId);
+    return this.installmentsService.findOverdue(
+      this.escopoConsultor(user, consultorId),
+      user?.role,
+      Number.isFinite(cliente) && cliente > 0 ? cliente : undefined,
+    );
   }
 
   // Parcelas com vencimento hoje — dashboard do caixa e do consultor
@@ -57,8 +66,9 @@ export class InstallmentsController {
 
   @Get(':id/encargos')
   @Roles('admin', 'financeiro', 'caixa')
-  getEncargos(@Param('id', ParseIntPipe) id: number) {
-    return this.installmentsService.getEncargos(id);
+  // 'data' congela o cálculo na data da baixa; sem ela, mostra a dívida de hoje.
+  getEncargos(@Param('id', ParseIntPipe) id: number, @Query('data') data?: string) {
+    return this.installmentsService.getEncargos(id, data || undefined);
   }
 
   @Get(':id')
