@@ -1,22 +1,62 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PaymentsService } from '../payments/payments.service';
+import type { PaymentFilterDto } from '../payments/dto/payment-filter.dto';
 import * as ExcelJS from 'exceljs';
+import { Prisma } from '@prisma/client';
+import { dataLocal, fimDoDiaUtc, inicioDoDiaUtc } from '../../common/data';
+import { filtroCliente } from '../../common/busca';
 import type { Response } from 'express';
 
 const BRL = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const DT = (d: Date | string | null | undefined) =>
   d ? new Date(d).toLocaleDateString('pt-BR') : '—';
+const CPF = (v: string | null | undefined) =>
+  v && v.length === 11 ? v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4') : (v ?? '');
+
+// A planilha vai para fora do sistema: 'aguardando_liberacao' nao e rotulo de
+// relatorio, e o mesmo texto que a tela mostra evita conferencia cruzada.
+const STATUS_LOAN: Record<string, string> = {
+  aguardando_aceite: 'Aguardando aceite',
+  aguardando_liberacao: 'Aguardando liberacao',
+  ativo: 'Ativo',
+  inadimplente: 'Inadimplente',
+  quitado: 'Quitado',
+  cancelado: 'Cancelado',
+};
 
 @Injectable()
 export class ExcelService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly payments: PaymentsService,
+  ) {}
 
   // ─── Relatório de Contratos ───────────────────────────────────────────────
 
-  async exportarContratos(status: string | undefined, res: Response): Promise<void> {
+  /**
+   * O filtro tem que ser o MESMO de LoansService.findAll. Planilha que ignora a
+   * busca e o periodo da tela devolve a carteira inteira, e quem exportou so
+   * descobre a divergencia depois de mandar o arquivo pra frente.
+   */
+  async exportarContratos(
+    filtros: { status?: string; search?: string; inicioDe?: string; inicioAte?: string },
+    res: Response,
+  ): Promise<void> {
+    const { status, search, inicioDe, inicioAte } = filtros;
+
+    const where: Prisma.LoanWhereInput = {};
+    if (status) where.status = status as any;
+    if (search) where.client = { OR: filtroCliente(search) };
+    if (inicioDe || inicioAte) {
+      where.dataInicio = {};
+      if (inicioDe) (where.dataInicio as Prisma.DateTimeFilter).gte = inicioDoDiaUtc(inicioDe);
+      if (inicioAte) (where.dataInicio as Prisma.DateTimeFilter).lte = fimDoDiaUtc(inicioAte);
+    }
+
     const loans = await this.prisma.loan.findMany({
-      where: status ? { status: status as any } : undefined,
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
         client: { select: { nome: true, cpf: true, whatsapp: true, cidade: true, estado: true } },
@@ -52,31 +92,60 @@ export class ExcelService {
 
     this.styleHeader(ws);
 
+    // Valor como TEXTO ('R$ 3.300,00') impede somar, ordenar e filtrar no Excel:
+    // quem recebe a planilha tem que redigitar tudo. Vai numero cru com formato.
+    const COL_MOEDA = ['valor', 'valorParcela', 'totalPagar', 'totalRecebido'];
+    COL_MOEDA.forEach((k) => (ws.getColumn(k).numFmt = 'R$ #,##0.00'));
+    ws.getColumn('dataInicio').numFmt = 'dd/mm/yyyy';
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    let somaValor = 0;
+    let somaTotalPagar = 0;
+    let somaRecebido = 0;
+
     loans.forEach((l) => {
       const pagas = l.installments.filter((i) => i.status === 'pago').length;
       const atrasadas = l.installments.filter((i) => i.status === 'atrasado').length;
       const totalRecebido = l.installments.reduce((s, i) => s + Number(i.totalPago), 0);
-      const valorParcela = l.installments[0]?.installmentAmount ?? 0;
+      const valorParcela = Number(l.installments[0]?.installmentAmount ?? 0);
       const totalPagar = l.installments.reduce((s, i) => s + Number(i.installmentAmount), 0);
+      const principal = Number(l.principalAmount);
+
+      somaValor += principal;
+      somaTotalPagar += totalPagar;
+      somaRecebido += totalRecebido;
 
       ws.addRow({
         id: l.id,
         cliente: l.client.nome,
-        cpf: l.client.cpf ?? '',
+        cpf: CPF(l.client.cpf),
         whatsapp: l.client.whatsapp ?? '',
         cidade: l.client.cidade ?? '',
         estado: l.client.estado ?? '',
-        valor: BRL(Number(l.principalAmount)),
+        valor: principal,
         parcelas: l.numeroParcelas,
-        valorParcela: BRL(Number(valorParcela)),
-        totalPagar: BRL(totalPagar),
-        dataInicio: DT(l.dataInicio),
-        status: l.status,
+        valorParcela,
+        totalPagar,
+        dataInicio: l.dataInicio,
+        status: STATUS_LOAN[l.status] ?? l.status,
         pagas,
         atrasadas,
-        totalRecebido: BRL(totalRecebido),
+        totalRecebido,
       });
     });
+
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: ws.rowCount, column: ws.columnCount } };
+
+    if (loans.length) {
+      ws.addRow({});
+      const total = ws.addRow({
+        cliente: `TOTAL — ${loans.length} contrato(s)`,
+        valor: somaValor,
+        totalPagar: somaTotalPagar,
+        totalRecebido: somaRecebido,
+      });
+      total.font = { bold: true };
+    }
 
     this.sendWorkbook(wb, res, `contratos-${Date.now()}.xlsx`);
   }
@@ -164,12 +233,72 @@ export class ExcelService {
 
   // ─── Relatório de Inadimplentes ───────────────────────────────────────────
 
-  async exportarInadimplentes(res: Response): Promise<void> {
+  async exportarInadimplentes(
+    res: Response,
+    filtro: { search?: string; startDate?: string; endDate?: string } = {},
+  ): Promise<void> {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
+    // Mesmos filtros da tela /inadimplentes: a planilha e a conferencia do que
+    // esta na frente do operador, nao a carteira inteira toda vez.
+    const where: Prisma.InstallmentWhereInput = { status: 'atrasado' };
+    const busca = filtro.search?.trim();
+    if (busca) {
+      // A tela compara o termo com nome/CPF/telefone ja normalizados no navegador.
+      // Reproduzir isso no Prisma nao da: telefone e gravado com espaco e hifen, e
+      // 'contains' de digitos nunca casa. Sao ~500 clientes — filtrar em memoria
+      // garante que a planilha traga exatamente as mesmas linhas da tela.
+      // Sem acento dos dois lados, igual a tela: 42 dos 518 clientes tem acento
+      // no nome e o operador digita sem.
+      const semAcento = (v: string) =>
+        v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const termo = semAcento(busca);
+      const digitos = busca.replace(/\D/g, '');
+      const clientes = await this.prisma.client.findMany({
+        select: { id: true, nome: true, cpf: true, whatsapp: true },
+      });
+      const ids = clientes
+        .filter(
+          (c) =>
+            semAcento(c.nome ?? '').includes(termo) ||
+            (!!digitos &&
+              ((c.cpf ?? '').replace(/\D/g, '').includes(digitos) ||
+                (c.whatsapp ?? '').replace(/\D/g, '').includes(digitos))),
+        )
+        .map((c) => c.id);
+      where.loan = { clientId: { in: ids } };
+    }
+    if (filtro.startDate || filtro.endDate) {
+      // A tela lista CONTRATOS e conta o atraso pelo vencimento em aberto mais antigo.
+      // Filtrar parcela a parcela responde outra pergunta: no 1o semestre de 2026 a tela
+      // mostrava 48 clientes e a planilha trazia 84, porque contratos com atraso mais
+      // velho tambem tem parcelas vencendo dentro do periodo. O periodo escolhe os
+      // contratos, e a planilha traz todas as parcelas em atraso deles — assim a soma
+      // da planilha fecha com o 'Total em Atraso' do card.
+      const ini = filtro.startDate ? dataLocal(filtro.startDate) : null;
+      const fim = filtro.endDate
+        ? new Date(`${filtro.endDate}T23:59:59.999`)
+        : null;
+      const emAtraso = await this.prisma.installment.findMany({
+        where: { status: 'atrasado' },
+        select: { loanId: true, dataVencimento: true },
+      });
+      const maisAntiga = new Map<number, Date>();
+      for (const i of emAtraso) {
+        const atual = maisAntiga.get(i.loanId);
+        if (!atual || i.dataVencimento < atual)
+          maisAntiga.set(i.loanId, i.dataVencimento);
+      }
+      where.loanId = {
+        in: [...maisAntiga.entries()]
+          .filter(([, d]) => (!ini || d >= ini) && (!fim || d <= fim))
+          .map(([loanId]) => loanId),
+      };
+    }
+
     const installments = await this.prisma.installment.findMany({
-      where: { status: 'atrasado' },
+      where,
       orderBy: { dataVencimento: 'asc' },
       include: {
         loan: {
@@ -227,6 +356,127 @@ export class ExcelService {
     });
 
     this.sendWorkbook(wb, res, `inadimplentes-${Date.now()}.xlsx`);
+  }
+
+  // ─── Recebimentos (mesma consulta da tela, sem paginacao) ─────────────────
+
+  async exportarRecebimentos(
+    filter: PaymentFilterDto,
+    role: string | undefined,
+    res: Response,
+  ): Promise<void> {
+    // Reusa findAll pra que a planilha traga exatamente o que a tela mostra:
+    // mesmos filtros, mesma divisao capital/lucro/comissao, mesmos totais.
+    const resultado = (await this.payments.findAll(
+      { ...filter, page: 1, limit: 100000 },
+      role,
+    )) as {
+      data: Array<{
+        id: number;
+        valorPago: unknown;
+        desconto: unknown;
+        dataPagamento: Date;
+        metodoPagamento: string;
+        contaDestino: string | null;
+        observacao: string | null;
+        estornado: boolean;
+        installment: {
+          numero: number;
+          loan: {
+            id: number;
+            client: { nome: string; cpf: string | null; consultor: { nome: string } | null };
+          };
+        };
+        split: {
+          capital: number;
+          lucro: number;
+          comissao: number;
+          comissaoAdministrador: number;
+          lucroEmpresa: number;
+        } | null;
+      }>;
+      totais?: Record<string, number>;
+    };
+
+    const verSplit = role !== 'caixa';
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'SIAFI — Lidera';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Recebimentos');
+    ws.columns = [
+      { header: 'Data', key: 'data', width: 12 },
+      { header: 'CPF', key: 'cpf', width: 16 },
+      { header: 'Cliente', key: 'cliente', width: 32 },
+      { header: 'Consultor', key: 'consultor', width: 22 },
+      { header: 'Contrato', key: 'contrato', width: 10 },
+      { header: 'Parcela', key: 'parcela', width: 9 },
+      { header: 'Valor Pago', key: 'valor', width: 14 },
+      { header: 'Desconto', key: 'desconto', width: 12 },
+      { header: 'Metodo', key: 'metodo', width: 14 },
+      { header: 'Conta/Banco', key: 'conta', width: 20 },
+      ...(verSplit
+        ? [
+            { header: 'Capital', key: 'capital', width: 14 },
+            { header: 'Lucro', key: 'lucro', width: 14 },
+            { header: 'Comissao Consultor', key: 'comissao', width: 18 },
+            { header: 'Comissao Administrador', key: 'comissaoAdm', width: 20 },
+            { header: 'Lucro Empresa', key: 'lucroEmpresa', width: 16 },
+          ]
+        : []),
+      { header: 'Situacao', key: 'situacao', width: 12 },
+      { header: 'Observacao', key: 'obs', width: 40 },
+    ];
+    this.styleHeader(ws);
+
+    for (const p of resultado.data) {
+      ws.addRow({
+        data: DT(p.dataPagamento),
+        cpf: p.installment.loan.client.cpf ?? '',
+        cliente: p.installment.loan.client.nome,
+        consultor: p.installment.loan.client.consultor?.nome ?? '',
+        contrato: p.installment.loan.id,
+        parcela: p.installment.numero,
+        valor: BRL(p.valorPago as number),
+        desconto: BRL(p.desconto as number),
+        metodo: p.metodoPagamento,
+        conta: p.contaDestino ?? '',
+        ...(verSplit && p.split
+          ? {
+              capital: BRL(p.split.capital),
+              lucro: BRL(p.split.lucro),
+              comissao: BRL(p.split.comissao),
+              comissaoAdm: BRL(p.split.comissaoAdministrador),
+              lucroEmpresa: BRL(p.split.lucroEmpresa),
+            }
+          : {}),
+        situacao: p.estornado ? 'Estornado' : 'Ativo',
+        obs: p.observacao ?? '',
+      });
+    }
+
+    const t = resultado.totais;
+    if (t) {
+      ws.addRow({});
+      const linha = ws.addRow({
+        cliente: 'TOTAL DO PERIODO (baixas ativas)',
+        valor: BRL(t.recebido),
+        desconto: BRL(t.desconto),
+        ...(verSplit
+          ? {
+              capital: BRL(t.capital ?? 0),
+              lucro: BRL(t.lucro ?? 0),
+              comissao: BRL(t.comissao ?? 0),
+              comissaoAdm: BRL(t.comissaoAdministrador ?? 0),
+              lucroEmpresa: BRL(t.lucroEmpresa ?? 0),
+            }
+          : {}),
+      });
+      linha.font = { bold: true };
+    }
+
+    this.sendWorkbook(wb, res, `recebimentos-${Date.now()}.xlsx`);
   }
 
   // ─── Helper ───────────────────────────────────────────────────────────────

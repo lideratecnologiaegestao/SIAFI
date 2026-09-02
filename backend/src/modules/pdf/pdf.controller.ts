@@ -13,6 +13,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { PdfService } from './pdf.service';
 import { ExcelService } from './excel.service';
+import { PaymentFilterDto } from '../payments/dto/payment-filter.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('export')
@@ -76,9 +78,12 @@ export class PdfController {
   @Roles('admin', 'financeiro')
   async contratosExcel(
     @Query('status') status: string | undefined,
+    @Query('search') search: string | undefined,
+    @Query('inicioDe') inicioDe: string | undefined,
+    @Query('inicioAte') inicioAte: string | undefined,
     @Res() res: Response,
   ) {
-    await this.excelService.exportarContratos(status, res);
+    await this.excelService.exportarContratos({ status, search, inicioDe, inicioAte }, res);
   }
 
   @Get('movimentacao/excel')
@@ -93,8 +98,23 @@ export class PdfController {
 
   @Get('inadimplentes/excel')
   @Roles('admin', 'financeiro')
-  async inadimplentesExcel(@Res() res: Response) {
-    await this.excelService.exportarInadimplentes(res);
+  async inadimplentesExcel(
+    @Query('search') search: string | undefined,
+    @Query('startDate') startDate: string | undefined,
+    @Query('endDate') endDate: string | undefined,
+    @Res() res: Response,
+  ) {
+    await this.excelService.exportarInadimplentes(res, { search, startDate, endDate });
+  }
+
+  @Get('pagamentos/excel')
+  @Roles('admin', 'financeiro', 'caixa')
+  async recebimentosExcel(
+    @Query() filter: PaymentFilterDto,
+    @CurrentUser() user: { role?: string },
+    @Res() res: Response,
+  ) {
+    await this.excelService.exportarRecebimentos(filter, user?.role, res);
   }
 
   // ─── Manual do Sistema (PDFKit legado) ────────────────────────────────────

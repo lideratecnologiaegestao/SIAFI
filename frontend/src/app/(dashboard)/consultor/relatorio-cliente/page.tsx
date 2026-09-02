@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import {
   FileText, CheckCircle2, AlertTriangle, CalendarClock, Wallet, Printer, Search, Users,
@@ -10,7 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatCPF, formatCurrency, formatDate } from '@/lib/utils'
+import { formatCPF, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { TratativasCard, LABEL_CANAL, type Tratativa } from '@/components/clientes/tratativas-card'
 
 interface ClienteOpt {
   id: number
@@ -149,12 +151,14 @@ function TabelaParcelas({
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
+          {/* Pagamento aparece nas tres tabelas, e nao so nas quitadas: parcela
+              vencida com baixa parcial precisa mostrar quando o dinheiro entrou. */}
           <thead className="bg-muted/20 text-xs text-muted-foreground">
             <tr>
               <th className="text-left px-4 py-2 font-medium">Parcela</th>
               <th className="text-left px-4 py-2 font-medium">Vencimento</th>
-              {mostrarPagamento && <th className="text-left px-4 py-2 font-medium">Pagamento</th>}
               <th className="text-right px-4 py-2 font-medium">Valor</th>
+              <th className="text-left px-4 py-2 font-medium">Pagamento</th>
               <th className="text-right px-4 py-2 font-medium">Pago</th>
               {mostrarAtraso && <th className="text-right px-4 py-2 font-medium">Multa/Mora</th>}
               {mostrarAtraso && <th className="text-right px-4 py-2 font-medium">Atraso</th>}
@@ -168,11 +172,9 @@ function TabelaParcelas({
               <tr key={p.id} className="hover:bg-muted/30">
                 <td className="px-4 py-2 font-medium">{p.numero}</td>
                 <td className="px-4 py-2">{formatDate(p.dataVencimento)}</td>
-                {mostrarPagamento && (
-                  <td className="px-4 py-2">{p.dataPagamento ? formatDate(p.dataPagamento) : '—'}</td>
-                )}
                 <td className="px-4 py-2 text-right">{formatCurrency(p.valor)}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(p.totalPago)}</td>
+                <td className="px-4 py-2">{p.dataPagamento ? formatDate(p.dataPagamento) : '—'}</td>
+                <td className="px-4 py-2 text-right font-medium text-blue-600">{formatCurrency(p.totalPago)}</td>
                 {mostrarAtraso && (
                   <td className="px-4 py-2 text-right text-red-600">
                     {formatCurrency(p.multa + p.mora)}
@@ -194,8 +196,22 @@ function TabelaParcelas({
 }
 
 export default function RelatorioClientePage() {
-  const [clientId, setClientId] = useState<number | null>(null)
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [busca, setBusca] = useState('')
+
+  // O cliente selecionado mora na URL (?clientId=) pra que outras telas — o
+  // dashboard do consultor, por exemplo — consigam linkar direto pro relatorio
+  // de um cliente, e pra que o link possa ser copiado e o voltar funcione.
+  const clientIdParam = Number(searchParams.get('clientId'))
+  const clientId = Number.isInteger(clientIdParam) && clientIdParam > 0 ? clientIdParam : null
+
+  function selecionarCliente(id: number | null) {
+    router.replace(
+      id ? `/consultor/relatorio-cliente?clientId=${id}` : '/consultor/relatorio-cliente',
+      { scroll: false },
+    )
+  }
 
   const { data: clientes, isLoading: loadingClientes } = useQuery<ClienteOpt[]>({
     queryKey: ['consultor-clientes-relatorio'],
@@ -207,6 +223,14 @@ export default function RelatorioClientePage() {
     queryFn: () => api.get(`/consultor/relatorio-cliente/${clientId}`).then((r) => r.data),
     enabled: !!clientId,
   })
+
+  // Mesma queryKey do TratativasCard: o cabecalho le do cache, sem request extra.
+  const { data: tratativas } = useQuery<Tratativa[]>({
+    queryKey: ['tratativas', clientId],
+    queryFn: () => api.get(`/clients/${clientId}/tratativas`).then((r) => r.data),
+    enabled: !!clientId,
+  })
+  const ultima = tratativas?.[0]
 
   const q = busca.trim().toLowerCase()
   const qd = q.replace(/\D/g, '')
@@ -282,7 +306,7 @@ export default function RelatorioClientePage() {
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => setClientId(c.id === clientId ? null : c.id)}
+                  onClick={() => selecionarCliente(c.id === clientId ? null : c.id)}
                   className={`text-left rounded-lg border p-3 transition hover:bg-muted/60 ${
                     c.id === clientId ? 'border-primary bg-primary/5 ring-1 ring-primary' : ''
                   }`}
@@ -347,6 +371,12 @@ export default function RelatorioClientePage() {
                 )}
                 {data.cliente.consultor && <span>Consultor: {data.cliente.consultor.nome}</span>}
                 <span>Contratos: {data.resumo.totalContratos}</span>
+                <span>
+                  Última tratativa:{' '}
+                  {ultima
+                    ? `${formatDateTime(ultima.createdAt)} · ${LABEL_CANAL[ultima.canal] ?? ultima.canal}`
+                    : 'nenhuma registrada'}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -377,6 +407,8 @@ export default function RelatorioClientePage() {
               sub={`${data.resumo.qtdAVencer} parcela(s) a vencer`}
             />
           </div>
+
+          <TratativasCard clientId={data.cliente.id} />
 
           {!data.contratos.length ? (
             <Card>

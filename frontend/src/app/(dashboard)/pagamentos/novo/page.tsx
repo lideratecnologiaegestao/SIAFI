@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, ArrowRight, Save, Search, User, CreditCard, CheckCircle2, AlertTriangle,
@@ -60,7 +60,15 @@ interface Encargos {
 export default function NovoPagamentoPage() {
   const qc           = useQueryClient()
   const searchParams = useSearchParams()
-  const preParcelaId = searchParams.get('parcelaId')
+  const router       = useRouter()
+
+  // O deep-link ?parcelaId= vale so para a PRIMEIRA baixa. Como ele vivia preso na
+  // URL, "Novo Pagamento" voltava ao passo 1 com a busca de clientes desligada
+  // (enabled: !preParcelaId) e a lista vazia: a operadora nao conseguia dar a
+  // segunda baixa. Virou estado justamente para poder ser zerado no reset.
+  const [preParcelaId, setPreParcelaId] = useState<string | null>(
+    () => searchParams.get('parcelaId'),
+  )
 
   const [step,   setStep]   = useState<WizardStep>(preParcelaId ? 3 : 1)
   const [search, setSearch] = useState('')
@@ -83,24 +91,20 @@ export default function NovoPagamentoPage() {
     staleTime: 60_000,
   })
 
-  // ── Step 1: all clients ────────────────────────────────────────────────────
-  const { data: allClients, isLoading: loadingClients } = useQuery<ClientRow[]>({
-    queryKey: ['clients-select'],
-    queryFn: () => api.get('/clients', { params: { limit: 500 } }).then(r => r.data.data ?? r.data),
+  // ── Step 1: busca de cliente ──────────────────────────────────────────────
+  // A busca corre no servidor. Carregando "os 500 primeiros" e filtrando aqui,
+  // os clientes alem do teto ficavam impossiveis de achar (ja sao 518) e a tela
+  // baixava 590 KB so para abrir.
+  const termo = search.trim()
+  const { data: filtered = [], isLoading: loadingClients } = useQuery<ClientRow[]>({
+    queryKey: ['clients-select', termo],
+    queryFn: () => api.get('/clients', {
+      params: { limit: 30, status: 'active', search: termo || undefined },
+    }).then(r => r.data.data ?? r.data),
     enabled:  !preParcelaId,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   })
-
-  const filtered = useMemo<ClientRow[]>(() => {
-    if (!allClients) return []
-    if (!search.trim()) return allClients.filter(c => c.active).slice(0, 25)
-    const q  = search.toLowerCase()
-    const qd = q.replace(/\D/g, '')
-    return allClients.filter(c =>
-      c.nome.toLowerCase().includes(q) ||
-      (qd && c.cpf.replace(/\D/g, '').includes(qd))
-    ).slice(0, 30)
-  }, [allClients, search])
 
   // ── Step 2: loans + installments ──────────────────────────────────────────
   const { data: loans, isLoading: loadingLoans } = useQuery<LoanRow[]>({
@@ -207,6 +211,8 @@ export default function NovoPagamentoPage() {
   }
 
   function resetWizard() {
+    if (searchParams.get('parcelaId')) router.replace('/pagamentos/novo')
+    setPreParcelaId(null)
     setStep(1); setSearch(''); setClient(null); setLoanId(null); setInst(null)
     form.reset({ dataPagamento: hojeISODate(), metodoPagamento: 'dinheiro' })
   }
@@ -292,12 +298,12 @@ export default function NovoPagamentoPage() {
                     <ArrowRight className="size-3.5 text-muted-foreground shrink-0" />
                   </button>
                 ))}
-                {!search.trim() && filtered.length === 25 && (
+                {!termo && filtered.length === 30 && (
                   <p className="text-xs text-muted-foreground text-center py-2">
                     Digite para filtrar todos os clientes
                   </p>
                 )}
-                {search.trim() && filtered.length === 0 && (
+                {termo && filtered.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-6">
                     Nenhum cliente encontrado.
                   </p>

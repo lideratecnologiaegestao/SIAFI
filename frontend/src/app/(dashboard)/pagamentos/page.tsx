@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Search, RefreshCw, Wallet, Undo2, FileDown, Calendar, Landmark, Percent, Save } from 'lucide-react'
+import { Plus, Search, RefreshCw, Wallet, Undo2, FileDown, FileSpreadsheet, Calendar, Landmark, Percent, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -13,7 +13,7 @@ import { ComboboxTexto } from '@/components/ui/combobox-texto'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
-import { formatCurrency, formatDateLocal, toNumber, hojeISODate, primeiroDiaMesISO } from '@/lib/utils'
+import { formatCurrency, formatDateLocal, formatCPF, toNumber, hojeISODate, primeiroDiaMesISO } from '@/lib/utils'
 import api from '@/lib/api'
 import { useAuth } from '@/contexts/auth.context'
 
@@ -30,7 +30,7 @@ interface Payment {
   installment: {
     id: number
     numero: number
-    loan: { id: number; client: { nome: string; consultor?: { id: number; nome: string } | null } }
+    loan: { id: number; client: { nome: string; cpf?: string | null; consultor?: { id: number; nome: string } | null } }
   }
   split?: {
     capital: number; lucro: number; comissao: number; comissaoAdministrador?: number
@@ -157,6 +157,41 @@ export default function PagamentosPage() {
 
   // Todos os totais são do período inteiro (agregados no backend, todo o filtro),
   // considerando apenas baixas não estornadas.
+  const [exportando, setExportando] = useState(false)
+
+  // A planilha sai com o mesmo filtro da tela (menos a paginacao), pra que o
+  // arquivo bata com o que o operador esta vendo.
+  async function exportarExcel() {
+    setExportando(true)
+    try {
+      const res = await api.get('/export/pagamentos/excel', {
+        responseType: 'blob',
+        params: {
+          search: search || undefined,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+          consultorId: consultorId ? Number(consultorId) : undefined,
+          contaDestino: contaDestino || undefined,
+          simComissaoPercentual: simComissao !== '' ? Number(simComissao) : undefined,
+          simComissaoAdministradorPercentual: simComissaoAdmin !== '' ? Number(simComissaoAdmin) : undefined,
+        },
+      })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(
+        new Blob([res.data as BlobPart], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+      )
+      a.download = `recebimentos-${startDate || 'inicio'}-a-${endDate || hojeISODate()}.xlsx`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch {
+      toast.error('Não foi possível gerar a planilha.')
+    } finally {
+      setExportando(false)
+    }
+  }
+
   const totalRecebido = data?.totais?.recebido ?? 0
   const totalDesconto = data?.totais?.desconto ?? 0
   const totalCapital = data?.totais?.capital ?? 0
@@ -172,9 +207,21 @@ export default function PagamentosPage() {
           <h1 className="text-2xl font-bold tracking-tight">Recebimentos</h1>
           <p className="text-muted-foreground text-sm mt-1">Histórico de recebimentos</p>
         </div>
-        <Link href="/pagamentos/novo">
-          <Button className="gap-2"><Plus className="size-4" />Registrar Recebimento</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
+            onClick={exportarExcel}
+            disabled={exportando}
+            title="Exportar os recebimentos filtrados para Excel"
+          >
+            <FileSpreadsheet className="size-4" />
+            {exportando ? 'Gerando...' : 'Excel'}
+          </Button>
+          <Link href="/pagamentos/novo">
+            <Button className="gap-2"><Plus className="size-4" />Registrar Recebimento</Button>
+          </Link>
+        </div>
       </div>
 
       <Card>
@@ -314,9 +361,11 @@ export default function PagamentosPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">CPF</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground min-w-[240px]">Cliente</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Consultor</th>
                     <th className="text-center px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Parcela</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell whitespace-nowrap">Pagamento</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Desconto</th>
                     {showSplit && <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Capital</th>}
@@ -325,13 +374,15 @@ export default function PagamentosPage() {
                     {showSplit && <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Com. Admin.</th>}
                     {showSplit && <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Lucro Empresa</th>}
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Bco Recebedor</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell whitespace-nowrap">Data</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">Ação</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.data.map((p) => (
                     <tr key={p.id} className={`border-b border-border hover:bg-muted/20 ${p.estornado ? 'opacity-50' : ''}`}>
+                      <td className="px-4 py-3 text-muted-foreground font-mono text-xs whitespace-nowrap">
+                        {p.installment?.loan?.client?.cpf ? formatCPF(p.installment.loan.client.cpf) : '—'}
+                      </td>
                       <td className="px-4 py-3 font-medium">
                         {p.installment?.loan?.client?.nome ?? '—'}
                         {p.estornado && <Badge variant="outline" className="ml-2 text-xs">Estornado</Badge>}
@@ -341,6 +392,9 @@ export default function PagamentosPage() {
                       </td>
                       <td className="px-4 py-3 text-center text-muted-foreground hidden lg:table-cell">
                         P{p.installment?.numero}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell whitespace-nowrap">
+                        {formatDateLocal(p.dataPagamento)}
                       </td>
                       <td className="px-4 py-3 text-right font-bold text-green-600">
                         {formatCurrency(p.valorPago)}
@@ -377,9 +431,6 @@ export default function PagamentosPage() {
                       )}
                       <td className="px-4 py-3 text-muted-foreground hidden xl:table-cell">
                         {p.contaDestino?.trim() ? p.contaDestino : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell whitespace-nowrap">
-                        {formatDateLocal(p.dataPagamento)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
