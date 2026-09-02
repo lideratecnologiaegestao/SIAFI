@@ -44,7 +44,20 @@ ENV NODE_ENV=production
 #   `freetype` e `harfbuzz` são dependências do Chromium; `ttf-freefont` evita
 #   PDF sem texto visível (fonte ausente rende retângulos vazios, e o PDF sai
 #   "válido" — falha silenciosa que só aparece para o cliente).
-RUN apk add --no-cache openssl ca-certificates chromium nss freetype harfbuzz ttf-freefont
+# curl → só para baixar o cloudflared logo abaixo.
+RUN apk add --no-cache openssl ca-certificates curl chromium nss freetype harfbuzz ttf-freefont
+
+# cloudflared → embutido para alcançar o Redis central via Cloudflare Zero Trust.
+# O entrypoint só o ativa quando REDIS_TUNNEL_EMBED=true; sem isso a imagem roda
+# só o Node (HML/local, onde o Redis é local ou tem sidecar).
+#
+# ⚠️ A ARQUITETURA VEM DO BUILD, NÃO FIXA. Cravar `-amd64` faz uma imagem arm64
+# baixar um binário x86 que só falha ao ser executado — build verde, contêiner
+# que não sobe. `TARGETARCH` é preenchido pelo BuildKit (amd64|arm64) e casa com
+# o nome dos releases do cloudflared.
+ARG TARGETARCH
+RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${TARGETARCH} \
+      -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared && cloudflared --version
 
 # O Puppeteer procura o Chrome que ele mesmo baixaria. Como aqui ele vem do
 # apk, é preciso dizer onde está — senão o serviço de PDF morre com
@@ -61,8 +74,12 @@ ARG APP_VERSION=
 ARG GIT_SHA=
 ENV APP_VERSION=$APP_VERSION GIT_SHA=$GIT_SHA
 
+# entrypoint: sobe o cloudflared (se REDIS_TUNNEL_EMBED=true) e então o Node.
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x docker-entrypoint.sh
+
 # Roda sem privilégio. O Chromium precisa de `--no-sandbox` quando o processo
 # não é root em contêiner — quem chama o Puppeteer já passa essa flag.
 USER node
 EXPOSE 4010
-CMD ["node", "dist/src/main"]
+CMD ["./docker-entrypoint.sh"]

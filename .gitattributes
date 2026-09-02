@@ -1,0 +1,4 @@
+# Script que roda DENTRO do contentor Alpine: com CRLF o kernel nao acha o
+# interpretador e o contentor morre em "bad interpreter". Nao depender da
+# configuracao de quem clona.
+*.sh text eol=lf
