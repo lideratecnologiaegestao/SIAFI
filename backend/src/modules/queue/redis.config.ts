@@ -6,6 +6,7 @@ const logger = new Logger('RedisConnection');
 export const redisConnection = new IORedis({
   host: process.env.REDIS_HOST ?? 'localhost',
   port: +(process.env.REDIS_PORT ?? 6379),
+  username: process.env.REDIS_USERNAME, // usuário ACL (undefined => default)
   password: process.env.REDIS_PASSWORD,
   // Índice do banco Redis — permite instâncias paralelas (demo=1) sem colidir filas
   db: +(process.env.REDIS_DB ?? 0),
