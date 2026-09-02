@@ -21,6 +21,7 @@ import {
   JOB_PROPOSTA_EXPIRADA_CONSULTOR,
 } from '../queue/queue.constants';
 import type { NotificationJobData, PaymentJobData } from '../queue/queue.interfaces';
+import { PAGAMENTO_ONLINE_ATIVO } from '../../common/pagamento-online';
 
 @Injectable()
 export class CronService implements OnModuleInit {
@@ -369,6 +370,9 @@ export class CronService implements OnModuleInit {
   @Cron('0 2 * * *', { name: 'conciliacao-pix', timeZone: 'America/Sao_Paulo' })
   async conciliacaoPix(): Promise<void> {
     if (this.cronDesligado) return;
+    // Sem gateway nao ha cobranca emitida para conciliar: a rotina so encheria
+    // a fila de trabalho que nao encontra nada.
+    if (!PAGAMENTO_ONLINE_ATIVO) return;
     this.logger.log('Cron: enfileirando job de conciliação PIX');
 
     await this.paymentQueue.add(

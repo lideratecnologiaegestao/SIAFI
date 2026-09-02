@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import api from '@/lib/api'
 import { useAuth } from '@/contexts/auth.context'
+import { PAGAMENTO_ONLINE_ATIVO } from '@/lib/pagamento-online';
 
 const schema = z.object({ installmentId: z.coerce.number().min(1) })
 type FormData = z.infer<typeof schema>
@@ -66,7 +67,42 @@ function ExpiresIn({ expiresAt }: { expiresAt: string | null }) {
   )
 }
 
+// Wrapper sem hooks: decide qual tela mostrar. A checagem NAO pode morar dentro
+// do componente que gera a cobranca — ele chama hooks logo abaixo, e um return
+// antes deles viola as Regras dos Hooks (o `next build` reprova no ESLint).
 export default function PixPage() {
+  if (!PAGAMENTO_ONLINE_ATIVO) return <PixDesativado />
+  return <PixGerador />
+}
+
+function PixDesativado() {
+  return (
+    <div className="p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <QrCode className="size-5" />
+            Cobrança online desativada
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            A emissão de cobrança pelo Mercado Pago (QR code / boleto) não está
+            habilitada nesta instalação.
+          </p>
+          <p>
+            O recebimento por PIX continua normal: registre a baixa em{' '}
+            <strong>Recebimentos</strong>, escolhendo <strong>PIX</strong> como
+            forma de pagamento.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function PixGerador() {
+
   const qc         = useQueryClient()
   const searchParams = useSearchParams()
   const preParcelaId = searchParams.get('parcelaId')

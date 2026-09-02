@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth.context'
 import { Button } from '@/components/ui/button'
 import { useUnreadCount } from '@/hooks/useUnreadCount'
+import { PAGAMENTO_ONLINE_ATIVO } from '@/lib/pagamento-online';
 
 interface NavItem {
   label: string
@@ -73,7 +74,11 @@ const navGroups: NavGroup[] = [
       { label: 'Caixa',         href: '/caixa',         icon: ArrowLeftRight },
       { label: 'Renegociações', href: '/renegociacoes', icon: RefreshCcw },
       { label: 'Conciliação',   href: '/conciliacao',   icon: ListChecks },
-      { label: 'PIX',           href: '/pix',           icon: QrCode },
+      // 'PIX' aqui e a cobranca online (QR code do Mercado Pago), nao a baixa por
+      // PIX — some quando o gateway esta desligado nesta instalacao.
+      ...(PAGAMENTO_ONLINE_ATIVO
+        ? [{ label: 'PIX', href: '/pix', icon: QrCode }]
+        : []),
     ],
   },
 
@@ -106,7 +111,9 @@ const navGroups: NavGroup[] = [
     title: 'Ferramentas',
     roles: ['consultor'],
     items: [
-      { label: 'PIX / Boleto',       href: '/pix',                   icon: QrCode },
+      ...(PAGAMENTO_ONLINE_ATIVO
+        ? [{ label: 'PIX / Boleto', href: '/pix', icon: QrCode }]
+        : []),
       { label: 'Reparcelamentos',    href: '/reparcelamentos',        icon: RefreshCcw },
       { label: 'Relatórios',         href: '/consultor/relatorios',  icon: BarChart2 },
       { label: 'Relatório do Cliente', href: '/consultor/relatorio-cliente', icon: FileText },

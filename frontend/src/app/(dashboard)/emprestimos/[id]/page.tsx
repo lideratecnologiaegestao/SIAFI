@@ -16,6 +16,7 @@ import { formatCurrency, formatDate, formatDateLocal, STATUS_LOAN, STATUS_INSTAL
 import { useAuth } from '@/contexts/auth.context'
 import api from '@/lib/api'
 import { ComboboxTexto } from '@/components/ui/combobox-texto'
+import { PAGAMENTO_ONLINE_ATIVO } from '@/lib/pagamento-online';
 
 interface Payment {
   id: number; valorPago: number; valorDevido?: number | null
@@ -680,7 +681,8 @@ export default function EmprestimoDetalhePage() {
                               onClick={() => handlePay(inst)}>
                               <DollarSign className="size-3" />{isParcial ? 'Complementar' : 'Pagar'}
                             </Button>
-                            {!isParcial && (
+                            {/* cobranca online (QR code); a baixa manual e o botao ao lado */}
+                            {!isParcial && PAGAMENTO_ONLINE_ATIVO && (
                               <Link href={`/pix?parcelaId=${inst.id}`}>
                                 <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
                                   <QrCode className="size-3" />PIX
