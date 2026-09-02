@@ -10,6 +10,7 @@ import { MoneyDisplay } from '@/components/portal/money-display'
 import { LoanStatusBadge, InstallmentStatusBadge } from '@/components/portal/status-badges'
 import { ProgressBar } from '@/components/portal/progress-bar'
 import { SkeletonContractCard, SkeletonLine } from '@/components/portal/skeleton-card'
+import { PAGAMENTO_ONLINE_ATIVO } from '@/lib/pagamento-online';
 
 interface Parcela {
   id: number
@@ -332,7 +333,7 @@ export default function ContratoDetalhePage() {
                     {fmtCurrency(isPagaravel && (p.saldoDevedor || p.moraAcumulada || p.multaAplicada) ? totalParcela : p.valor)}
                   </p>
                 </div>
-                {isPagaravel && (
+                {isPagaravel && PAGAMENTO_ONLINE_ATIVO && (
                   <Link href={`/portal/pagamentos/pix/${p.id}`} style={{ textDecoration: 'none' }}>
                     <button style={{
                       display: 'flex',
@@ -366,7 +367,7 @@ export default function ContratoDetalhePage() {
       </div>
 
       {/* ── CTA sticky ───────────────────────────────── */}
-      {data.status === 'ativo' && data.parcelas.find(p => p.status === 'pendente' || p.status === 'atrasado') && (() => {
+      {PAGAMENTO_ONLINE_ATIVO && data.status === 'ativo' && data.parcelas.find(p => p.status === 'pendente' || p.status === 'atrasado') && (() => {
         const prox = data.parcelas.find(p => p.status === 'pendente' || p.status === 'atrasado')
         if (!prox) return null
         return (

@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import type { Request } from 'express';
 import { QUEUE_PAYMENT_PROCESSING, JOB_PAYMENT_WEBHOOK } from '../queue/queue.constants';
 import type { PaymentJobData } from '../queue/queue.interfaces';
+import { PAGAMENTO_ONLINE_ATIVO } from '../../common/pagamento-online';
 
 interface MpWebhookBody {
   action?: string;
@@ -30,6 +31,14 @@ export class WebhookController {
     @Body() body: MpWebhookBody,
     @Req() req: Request,
   ): Promise<{ received: boolean }> {
+    // Gateway desligado nesta instalacao: ACEITA e descarta.
+    // 200 de proposito — 4xx/5xx fazem o Mercado Pago reenviar o mesmo evento
+    // por horas. Nao valida assinatura nem enfileira: nao ha o que processar.
+    if (!PAGAMENTO_ONLINE_ATIVO) {
+      this.logger.warn('Webhook MP recebido com o gateway desligado — descartado');
+      return { received: true };
+    }
+
     const isLive = body.live_mode === true;
     const secret = process.env.MP_WEBHOOK_SECRET;
 

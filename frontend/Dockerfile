@@ -12,10 +12,16 @@ ARG NEXT_PUBLIC_API_URL=https://2wm.siafi.app.br/api
 ARG NEXT_PUBLIC_URL=https://2wm.siafi.app.br
 ARG NEXT_PUBLIC_SUPABASE_URL=
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=
+# Cobrança online (Mercado Pago). Vazio ou ausente = ligado; só 'false' desliga,
+# para a DEMO e os próximos clientes não mudarem de comportamento. Esconde o
+# gerador de QR code e os botões de pagar — NÃO mexe na baixa por PIX, que é o
+# meio mais usado da carteira e continua em Recebimentos.
+ARG NEXT_PUBLIC_PAGAMENTO_ONLINE=
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_URL=$NEXT_PUBLIC_URL \
     NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
-    NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY \
+    NEXT_PUBLIC_PAGAMENTO_ONLINE=$NEXT_PUBLIC_PAGAMENTO_ONLINE
 
 COPY package*.json ./
 RUN npm ci

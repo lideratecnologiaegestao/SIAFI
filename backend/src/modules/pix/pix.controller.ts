@@ -9,13 +9,16 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { PagamentoOnlineGuard } from '../../common/guards/pagamento-online.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PixService } from './pix.service';
 import { GeneratePixDto } from './dto/generate-pix.dto';
 import type { RequestUser } from '../auth/guards/supabase-auth.guard';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+// PagamentoOnlineGuard fecha o modulo inteiro quando o gateway esta desligado
+// nesta instalacao (PAGAMENTO_ONLINE_ENABLED=false).
+@UseGuards(JwtAuthGuard, RolesGuard, PagamentoOnlineGuard)
 @Controller('pix')
 export class PixController {
   constructor(private readonly pixService: PixService) {}
