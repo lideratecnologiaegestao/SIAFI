@@ -50,7 +50,6 @@ const schema = z.object({
   cep: z.string().optional(), observacoes: z.string().optional(),
   active: z.boolean().optional(),
   avalistas: z.array(z.object({
-    id: z.coerce.number().optional(), // id if already exists
     clienteId: z.coerce.number().optional(),
     nome: z.string().optional(),
     cpf: z.string().optional(),
@@ -147,17 +146,21 @@ export default function EditarClientePage() {
 
   useEffect(() => {
     if (client) {
+      // Campo vazio chega da API como null e z.string().optional() recusa null — sem
+      // isso o submit pode travar sem mensagem em cliente sem RG, telefone, bairro etc.
+      const semNulos = Object.fromEntries(Object.entries(client).map(([k, v]) => [k, v ?? '']))
       reset({
-        ...client,
+        ...semNulos,
         dataNascimento: client.dataNascimento ? client.dataNascimento.split('T')[0] : '',
         email: client.email ?? '',
+        // Sem o id do registro: o backend recria os avalistas a cada edicao e recusa
+        // com 400 qualquer campo fora do AvalistaDto ("property id should not exist").
         avalistas: client.meusAvalistas?.map((a: any) => ({
-          id: a.id,
-          clienteId: a.avalistaId,
-          nome: a.nome,
-          cpf: a.cpf,
-          telefone: a.telefone,
-          parentesco: a.parentesco,
+          clienteId: a.clienteVinculadoId ?? undefined,
+          nome: a.nome ?? '',
+          cpf: a.cpf ?? '',
+          telefone: a.telefone ?? '',
+          parentesco: a.parentesco ?? '',
         })) || []
       })
     }
@@ -241,7 +244,9 @@ export default function EditarClientePage() {
             <div className="space-y-1.5"><Label>Telefone</Label><Input {...register('telefone')} /></div>
             <div className="space-y-1.5">
               <Label>Status</Label>
-              <Select {...register('active', { setValueAs: (v) => v === 'true' })}>
+              {/* O reset passa o boolean true por aqui e o select passa a string 'true';
+                  so com v === 'true' todo salvar gravava o cliente como Inativo. */}
+              <Select {...register('active', { setValueAs: (v) => v === true || v === 'true' })}>
                 <option value="true">Ativo</option>
                 <option value="false">Inativo</option>
               </Select>
