@@ -22,6 +22,7 @@ import {
 } from '../queue/queue.constants';
 import type { NotificationJobData, PaymentJobData } from '../queue/queue.interfaces';
 import { PAGAMENTO_ONLINE_ATIVO } from '../../common/pagamento-online';
+import { COBRANCA_AUTOMATICA_ATIVA } from '../../common/cobranca-automatica';
 
 @Injectable()
 export class CronService implements OnModuleInit {
@@ -50,6 +51,16 @@ export class CronService implements OnModuleInit {
   onModuleInit() {
     if (this.cronDesligado) {
       this.logger.warn('CRON_ENABLED=false — rotinas automaticas desligadas nesta instancia');
+    }
+    // Avisa no arranque porque o corte e um `return` silencioso: sem esta linha a
+    // instancia parece estar cobrando e nao esta. Foi exatamente assim que o
+    // CRON_ENABLED=false passou semanas parecendo ligado.
+    if (!COBRANCA_AUTOMATICA_ATIVA) {
+      this.logger.warn(
+        'COBRANCA_AUTOMATICA_ENABLED=false — nenhum aviso de vencimento ou atraso sera ' +
+        'disparado automaticamente. Seguem rodando: mark-overdue, atualizar-encargos, ' +
+        'sla-aceite e sla-intencoes. Cobranca manual pela tela segue disponivel.',
+      );
     }
   }
 
@@ -82,6 +93,7 @@ export class CronService implements OnModuleInit {
   @Cron('0 9 * * *', { name: 'send-reminders', timeZone: 'America/Sao_Paulo' })
   async sendReminders(): Promise<void> {
     if (this.cronDesligado) return;
+    if (!COBRANCA_AUTOMATICA_ATIVA) return;
     this.logger.log('Cron: enfileirando lembretes de vencimento (próximos 3 dias)');
 
     const today = new Date();
@@ -135,6 +147,7 @@ export class CronService implements OnModuleInit {
   @Cron('0 10 * * *', { name: 'send-overdue', timeZone: 'America/Sao_Paulo' })
   async sendOverdueNotices(): Promise<void> {
     if (this.cronDesligado) return;
+    if (!COBRANCA_AUTOMATICA_ATIVA) return;
     this.logger.log('Cron: enfileirando cobranças de atraso');
 
     const today = new Date();
@@ -175,6 +188,7 @@ export class CronService implements OnModuleInit {
   @Cron('0 11 * * *', { name: 'lembrete-reparcelamentos', timeZone: 'America/Sao_Paulo' })
   async lembreteReparcelamentosAprovados(): Promise<void> {
     if (this.cronDesligado) return;
+    if (!COBRANCA_AUTOMATICA_ATIVA) return;
     this.logger.log('Cron: lembretes de reparcelamentos aprovados não executados');
 
     const limite = new Date(Date.now() - 3 * 86_400_000); // aprovados há mais de 3 dias
@@ -452,6 +466,7 @@ export class CronService implements OnModuleInit {
   @Cron('30 9 * * *', { name: 'cobrancas-antecipadas', timeZone: 'America/Sao_Paulo' })
   async enviarCobrancasAntecipadas(): Promise<void> {
     if (this.cronDesligado) return;
+    if (!COBRANCA_AUTOMATICA_ATIVA) return;
     this.logger.log('Cron: processando cobranças antecipadas');
     await this.cobranca.processarCobrancasAntecipadas();
   }
@@ -459,6 +474,7 @@ export class CronService implements OnModuleInit {
   @Cron('0 14 * * *', { name: 'reenviar-cobrancas', timeZone: 'America/Sao_Paulo' })
   async reenviarCobrancasNaoLidas(): Promise<void> {
     if (this.cronDesligado) return;
+    if (!COBRANCA_AUTOMATICA_ATIVA) return;
     this.logger.log('Cron: reenviando cobranças D-3');
     await this.cobranca.reenviarCobrancas();
   }
