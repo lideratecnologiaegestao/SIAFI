@@ -49,7 +49,7 @@ interface LoanRow {
   consultor?: { id: number; nome: string } | null
 }
 
-interface LoansResponse { data: LoanRow[]; total: number; page: number; lastPage: number; totais?: { capital: number; totalAReceber: number; parcelas: number } }
+interface LoansResponse { data: LoanRow[]; total: number; page: number; lastPage: number; totais?: { capital: number; totalAReceber: number } }
 
 interface PixPayment {
   id: number
@@ -738,8 +738,12 @@ export default function EmprestimosPage() {
   }
 
   const capitalFiltrado = data?.totais?.capital ?? data?.data.reduce((s, l) => s + toNumber(l.principalAmount), 0) ?? 0
-  const parcelasFiltradas = data?.totais?.parcelas
-    ?? data?.data.reduce((s, l) => s + (l.numeroParcelas > 0 ? toNumber(l.totalReceivable) / l.numeroParcelas : 0), 0)
+  // ⚠️ Somar `totalReceivable / numeroParcelas` daria a soma da coluna "Vl. Parcela"
+  // — o valor de UMA parcela de cada contrato, empilhado — e era o que o rodape
+  // mostrava: R$ 59.646,00 onde o total a receber era R$ 228.980,01. O que se soma
+  // e o `totalReceivable`, que ja e quantidade x valor da parcela.
+  const totalAReceberFiltrado = data?.totais?.totalAReceber
+    ?? data?.data.reduce((s, l) => s + toNumber(l.totalReceivable), 0)
     ?? 0
 
   return (
@@ -1026,7 +1030,7 @@ export default function EmprestimosPage() {
                   Capital{data.total > 1 ? ` dos ${data.total} contratos` : ''}: {formatCurrency(capitalFiltrado)}
                 </p>
                 <p className="text-sm font-medium">
-                  Parcelas: {formatCurrency(parcelasFiltradas)}
+                  Total a receber: {formatCurrency(totalAReceberFiltrado)}
                 </p>
               </div>
               {data.lastPage > 1 && (
