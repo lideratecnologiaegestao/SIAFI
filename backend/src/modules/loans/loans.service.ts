@@ -44,7 +44,7 @@ export class LoansService {
 
   // ─── Queries ────────────────────────────────────────────────────────────────
 
-  async findAll(filters: LoanFilterDto, role?: string): Promise<PaginatedResponse<unknown> & { totais?: { capital: number; totalAReceber: number; parcelas: number } }> {
+  async findAll(filters: LoanFilterDto, role?: string): Promise<PaginatedResponse<unknown> & { totais?: { capital: number; totalAReceber: number } }> {
     const { page, limit, search, status, clientId, inicioDe, inicioAte } = filters;
     const skip = (page - 1) * limit;
 
@@ -73,26 +73,27 @@ export class LoansService {
         ? null
         : this.prisma.loan.aggregate({ where, _sum: { principalAmount: true, totalReceivable: true } }),
     ]);
-    // O valor da parcela nao e coluna: sai do total dividido pelo numero de parcelas de cada contrato.
-    const parcelas = role === 'caixa'
-      ? []
-      : await this.prisma.loan.findMany({ where, select: { totalReceivable: true, numeroParcelas: true } });
-    const somaParcelas = parcelas.reduce(
-      (s, l) => (l.numeroParcelas > 0 ? s.plus(new Decimal(l.totalReceivable.toString()).div(l.numeroParcelas)) : s),
-      new Decimal(0),
-    );
-
     if (role === 'caixa') {
       return paginate(data.map((l) => this.sanitizeForCaixa(l as Record<string, unknown>)), total, page, limit);
     }
 
     // O rodape da tela mostra o total do filtro inteiro, nao so da pagina aberta.
+    //
+    // ⚠️ AQUI HAVIA UM CAMPO `parcelas` COM A SOMA DE `totalReceivable / numeroParcelas`
+    // — isto e, a soma da coluna "Vl. Parcela": o valor de UMA parcela de cada
+    // contrato, empilhado. Nao representa nada (nem o que entra por mes, nem o
+    // total a receber) e aparecia no rodape como se fosse dinheiro a receber:
+    // mostrava R$ 59.646,00 onde o devido era R$ 228.980,01. O numero certo e o
+    // `totalAReceber`, que ja saia daqui pelo agregado e nunca era exibido.
+    //
+    // Com o campo foi embora tambem um `findMany` que carregava TODOS os contratos
+    // do filtro a cada abertura da tela, so para alimentar essa soma. O agregado
+    // resolve capital e total no proprio SQL.
     return {
       ...paginate(data, total, page, limit),
       totais: {
         capital: Number(soma?._sum.principalAmount ?? 0),
         totalAReceber: Number(soma?._sum.totalReceivable ?? 0),
-        parcelas: somaParcelas.toDecimalPlaces(2).toNumber(),
       },
     };
   }
